@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
 // Collector 负责采集本机所有 CodeBuddy session 状态
@@ -18,20 +18,24 @@ func New() *Collector {
 
 // CollectSessions 扫描所有 PID 文件，返回 session 状态列表
 // 单个 session 异常时跳过，不返回错误
+// 同时采集 CodeBuddy 与 Claude Code 两类 session
 func (c *Collector) CollectSessions() []protocol.SessionInfo {
-	pidFiles, err := ReadPIDFiles()
-	if err != nil {
-		return nil
+	var sessions []protocol.SessionInfo
+
+	// 1. CodeBuddy sessions
+	if pidFiles, err := ReadPIDFiles(); err == nil {
+		for _, pf := range pidFiles {
+			info, err := c.collectOne(pf)
+			if err != nil {
+				continue
+			}
+			sessions = append(sessions, info)
+		}
 	}
 
-	var sessions []protocol.SessionInfo
-	for _, pf := range pidFiles {
-		info, err := c.collectOne(pf)
-		if err != nil {
-			continue
-		}
-		sessions = append(sessions, info)
-	}
+	// 2. Claude Code sessions（已带 ToolClaudeCode 标记）
+	sessions = append(sessions, CollectClaudeCodeSessions()...)
+
 	return sessions
 }
 
@@ -76,6 +80,7 @@ func (c *Collector) collectOne(pf PIDFile) (protocol.SessionInfo, error) {
 		SessionID:     pf.SessionID,
 		PID:           pf.PID,
 		Kind:          protocol.SessionKind(pf.Kind),
+		Tool:          protocol.ToolCodeBuddy,
 		CWD:           pf.CWD,
 		StartedAt:     pf.StartedAt,
 		LastHeartbeat: pf.LastHeartbeat,

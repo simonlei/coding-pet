@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
 const (
@@ -44,6 +44,13 @@ func (s *Store) UpdateMachine(report protocol.AgentReport) {
 	existing.Online = true
 	existing.OfflineSince = 0
 	existing.Sessions = report.Sessions
+
+	// 向后兼容：旧 Agent 未上报 tool 字段时默认视为 codebuddy
+	for i := range existing.Sessions {
+		if existing.Sessions[i].Tool == "" {
+			existing.Sessions[i].Tool = protocol.ToolCodeBuddy
+		}
+	}
 }
 
 // CheckOffline 每秒调用：标记掉线机器，清理过期条目，离线机器 session 状态覆盖为 unknown

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>CodeBuddy Dashboard</title>
+  <title>Coding Pet Dashboard</title>
   <style>
     *, *::before, *::after {
       box-sizing: border-box;
@@ -86,6 +86,18 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
       padding: 8px 4px 4px;
+    }
+
+    /* Tool group label inside a machine's session list */
+    .tool-group-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #c4b5fd;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 8px 14px 4px;
+      background: #16213e;
+      border-top: 1px solid #1e2d4a;
     }
 
     /* Waiting Section */
@@ -442,7 +454,7 @@
 <body>
   <div class="container" id="app">
     <div class="header">
-      <h1>CodeBuddy Dashboard</h1>
+      <h1>Coding Pet Dashboard</h1>
     </div>
 
     <div class="stats" id="statsBar">
@@ -606,6 +618,7 @@
           var machine = item.machine;
           var cwdShort = escapeHtml(basename(session.cwd));
           var machineName = escapeHtml(machine.hostname || machine.machine_id);
+          var toolLabel = escapeHtml(TOOL_LABELS[session.tool] || session.tool || 'CodeBuddy');
           var duration = msToDuration(Date.now() - session.started_at);
           var lastActive = msToAgo(session.last_activity);
 
@@ -615,7 +628,7 @@
           html += '<div class="' + cardClass + '">';
           html += '<div class="session-content">';
           html += '<div class="session-row">';
-          html += '<span class="session-machine-prefix">' + machineName + ' / ' + cwdShort + '</span>';
+          html += '<span class="session-machine-prefix">' + toolLabel + ' · ' + machineName + ' / ' + cwdShort + '</span>';
           html += '</div>';
           html += '<div class="session-row">';
           html += '<span class="session-label">' + duration + '</span>';
@@ -671,13 +684,10 @@
           html += '<span class="machine-badge ' + statusClass + '">' + badgeHtml + '</span>';
           html += '</div>';
 
-          // Sessions
+          // Sessions — grouped by tool
           var sessionHtml = '';
           if (machine.sessions && machine.sessions.length > 0) {
-            machine.sessions.forEach(function (session) {
-              if (session.state === 'terminated') return;
-              sessionHtml += renderSessionCard(session, machine);
-            });
+            sessionHtml = renderSessionsByTool(machine.sessions, machine);
           }
 
           html += '<div class="sessions-container' + (isExpanded ? '' : ' collapsed') + '"';
@@ -717,6 +727,50 @@
             }
           });
         });
+      }
+
+      // 工具显示名映射
+      var TOOL_LABELS = {
+        codebuddy: 'CodeBuddy',
+        claude_code: 'Claude Code'
+      };
+
+      // 工具分组顺序：已知工具优先，其余按出现顺序追加
+      var TOOL_ORDER = ['codebuddy', 'claude_code'];
+
+      function renderSessionsByTool(sessions, machine) {
+        // 过滤已终止，按 tool 分组（未知 tool 视为 codebuddy）
+        var groups = {};
+        var order = [];
+        sessions.forEach(function (session) {
+          if (session.state === 'terminated') return;
+          var tool = session.tool || 'codebuddy';
+          if (!groups[tool]) {
+            groups[tool] = [];
+            order.push(tool);
+          }
+          groups[tool].push(session);
+        });
+
+        // 排序：已知工具按 TOOL_ORDER，未知工具保持出现顺序追加在后
+        order.sort(function (a, b) {
+          var ia = TOOL_ORDER.indexOf(a);
+          var ib = TOOL_ORDER.indexOf(b);
+          if (ia === -1 && ib === -1) return 0;
+          if (ia === -1) return 1;
+          if (ib === -1) return -1;
+          return ia - ib;
+        });
+
+        var html = '';
+        order.forEach(function (tool) {
+          var label = TOOL_LABELS[tool] || tool;
+          html += '<div class="tool-group-label">' + escapeHtml(label) + '</div>';
+          groups[tool].forEach(function (session) {
+            html += renderSessionCard(session, machine);
+          });
+        });
+        return html;
       }
 
       function renderSessionCard(session, machine) {

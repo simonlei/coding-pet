@@ -3,10 +3,10 @@
 build: build-agent build-server
 
 build-agent:
-	go build -o dashboard-agent ./cmd/agent/
+	go build -o coding-pet-agent ./cmd/agent/
 
 build-server:
-	go build -o dashboard-server ./cmd/server/
+	go build -o coding-pet-server ./cmd/server/
 
 clean:
-	rm -f dashboard-agent dashboard-server
+	rm -f coding-pet-agent coding-pet-server

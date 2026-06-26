@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
 // noiseTypes 扫描时跳过的噪音类型
