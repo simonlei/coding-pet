@@ -116,23 +116,25 @@ func TestCollectClaudeCode_WaitingApproval(t *testing.T) {
 	}
 }
 
-func TestCollectClaudeCode_StaleIsTerminated(t *testing.T) {
+func TestCollectClaudeCode_StaleTimestampStillActive(t *testing.T) {
+	// Claude Code 的 statusUpdatedAt 是事件驱动的（非周期心跳），
+	// 因此时间戳很旧但进程存活的 session 仍应视为 active，不能误判 terminated。
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	now := time.Now().UnixMilli()
 	pid := os.Getpid() // 存活，但 statusUpdatedAt 过期
 
 	content := `{"pid":` + itoa(pid) + `,"sessionId":"sess-stale","cwd":"/tmp/proj","startedAt":` +
-		i64toa(now-200_000) + `,"kind":"interactive","status":"busy","updatedAt":` +
-		i64toa(now-120_000) + `,"statusUpdatedAt":` + i64toa(now-120_000) + `}`
+		i64toa(now-2_000_000) + `,"kind":"interactive","status":"busy","updatedAt":` +
+		i64toa(now-1_800_000) + `,"statusUpdatedAt":` + i64toa(now-1_800_000) + `}`
 	writeClaudePID(t, dir, "stale.json", content)
 
 	sessions := CollectClaudeCodeSessions()
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(sessions))
 	}
-	if sessions[0].State != protocol.StateTerminated {
-		t.Errorf("expected terminated (stale), got %q", sessions[0].State)
+	if sessions[0].State != protocol.StateActive {
+		t.Errorf("expected active (alive process, stale timestamp), got %q", sessions[0].State)
 	}
 }
 

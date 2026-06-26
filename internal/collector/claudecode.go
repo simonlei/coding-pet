@@ -2,7 +2,8 @@
 //
 // Claude Code 的磁盘布局与 CodeBuddy 类似但字段不同：
 //   - pid 文件位于 $CLAUDE_CONFIG_DIR/sessions/*.json（未设置时回退 ~/.tclaude/sessions）
-//   - 没有 lastHeartbeat 字段，使用 statusUpdatedAt（回退 updatedAt）作为新鲜度信号
+//   - 没有 lastHeartbeat 字段，updatedAt/statusUpdatedAt 是事件驱动的（仅状态变化时写入），
+//     并非周期性心跳，因此不能用时间戳新鲜度判活；存活判定完全依赖进程是否存在
 //   - 状态来自 status 字段（busy/shell/idle/waiting），waiting 时附带 waitingFor 说明原因
 package collector
 
@@ -10,13 +11,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
-
-// claudeStaleThresholdMs：statusUpdatedAt 超过此时间未更新视为已终止（与 CodeBuddy 心跳超时一致，60s）
-const claudeStaleThresholdMs = 60_000
 
 // claudePIDFile 对应 Claude Code 的 $CLAUDE_CONFIG_DIR/sessions/<pid>.json
 type claudePIDFile struct {
@@ -95,22 +92,20 @@ func CollectClaudeCodeSessions() []protocol.SessionInfo {
 		return nil
 	}
 
-	now := time.Now().UnixMilli()
 	var sessions []protocol.SessionInfo
 	for _, pf := range pidFiles {
-		// 新鲜度信号：优先 statusUpdatedAt，回退 updatedAt
+		// 新鲜度信号：优先 statusUpdatedAt，回退 updatedAt（仅用于展示"最后活跃"，不用于判活）
 		lastActivity := pf.StatusUpdatedAt
 		if lastActivity == 0 {
 			lastActivity = pf.UpdatedAt
 		}
 
+		// 存活判定：Claude Code 的时间戳是事件驱动的、非周期心跳，因此只能依据进程是否存在。
+		// 进程存活时按 status 判定具体状态，否则视为已终止。
 		var state protocol.SessionState
-		switch {
-		case now-lastActivity > claudeStaleThresholdMs:
+		if !isProcessAlive(pf.PID) {
 			state = protocol.StateTerminated
-		case !isProcessAlive(pf.PID):
-			state = protocol.StateTerminated
-		default:
+		} else {
 			state = mapClaudeStatus(pf.Status, pf.WaitingFor)
 		}
 
