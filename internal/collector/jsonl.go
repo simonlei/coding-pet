@@ -29,7 +29,11 @@ type JSONLEntry struct {
 // findSessionJSONL 在 ~/.codebuddy/projects/<name>/<sessionID>.jsonl 查找
 // 注意：直接在 project 目录下找，没有 sessions 子目录
 func findSessionJSONL(sessionID string) (string, bool) {
-	projectsDir := filepath.Join(os.Getenv("HOME"), ".codebuddy", "projects")
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	projectsDir := filepath.Join(homeDir, ".codebuddy", "projects")
 	entries, err := os.ReadDir(projectsDir)
 	if err != nil {
 		return "", false
