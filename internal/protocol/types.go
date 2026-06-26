@@ -20,11 +20,20 @@ const (
 	KindDaemon      SessionKind = "daemon"
 )
 
+// SessionTool 标识 session 来源工具（CodeBuddy / Claude Code）
+type SessionTool string
+
+const (
+	ToolCodeBuddy  SessionTool = "codebuddy"   // CodeBuddy CLI
+	ToolClaudeCode SessionTool = "claude_code" // Claude Code CLI
+)
+
 // SessionInfo 单个 CodeBuddy session 的状态
 type SessionInfo struct {
 	SessionID     string       `json:"session_id"`
 	PID           int          `json:"pid"`
 	Kind          SessionKind  `json:"kind"`
+	Tool          SessionTool  `json:"tool"` // 来源工具：codebuddy / claude_code
 	CWD           string       `json:"cwd"`
 	StartedAt     int64        `json:"started_at"`     // Unix ms
 	LastHeartbeat int64        `json:"last_heartbeat"` // Unix ms，来自 PID 文件
