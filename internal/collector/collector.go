@@ -76,6 +76,7 @@ func (c *Collector) collectOne(pf PIDFile) (protocol.SessionInfo, error) {
 		SessionID:     pf.SessionID,
 		PID:           pf.PID,
 		Kind:          protocol.SessionKind(pf.Kind),
+		Tool:          protocol.ToolCodeBuddy,
 		CWD:           pf.CWD,
 		StartedAt:     pf.StartedAt,
 		LastHeartbeat: pf.LastHeartbeat,
