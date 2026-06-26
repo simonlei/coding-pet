@@ -525,11 +525,6 @@
           });
         });
 
-        // Sort online machines by last report (most recent first)
-        onlineMachines.sort(function (a, b) {
-          return b.last_report - a.last_report;
-        });
-
         // Update stats
         document.getElementById('statWaiting').textContent =
           String(data.waiting_count != null ? data.waiting_count : 0);

@@ -105,14 +105,19 @@ func (s *Store) GetDashboard() protocol.DashboardResponse {
 		}
 	}
 
-	// 排序：有等待输入 session 的机器优先，然后按 LastReport 降序
+	// 排序：1. 等待输入优先 2. 在线优先 3. MachineID 升序（稳定排序）
 	sort.Slice(resp.Machines, func(i, j int) bool {
 		wi := haswWaiting(resp.Machines[i])
 		wj := haswWaiting(resp.Machines[j])
 		if wi != wj {
-			return wi // 有等待的排前面
+			return wi
 		}
-		return resp.Machines[i].LastReport > resp.Machines[j].LastReport
+		oi := resp.Machines[i].Online
+		oj := resp.Machines[j].Online
+		if oi != oj {
+			return oi
+		}
+		return resp.Machines[i].MachineID < resp.Machines[j].MachineID
 	})
 
 	return resp
