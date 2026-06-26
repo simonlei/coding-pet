@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
@@ -19,11 +20,13 @@ var noiseTypes = map[string]bool{
 	"topic":                 true,
 }
 
-// JSONLEntry 最简解析结构，只关心 type/role/status
+// JSONLEntry 最简解析结构
 type JSONLEntry struct {
-	Type   string `json:"type"`
-	Role   string `json:"role"`
-	Status string `json:"status"`
+	Type      string `json:"type"`
+	Role      string `json:"role"`
+	Status    string `json:"status"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // function_call 的参数，JSON 字符串
 }
 
 // findSessionJSONL 在 ~/.codebuddy/projects/<name>/<sessionID>.jsonl 查找
@@ -96,6 +99,20 @@ func readLastMeaningfulEntry(path string) (*JSONLEntry, error) {
 	return nil, nil
 }
 
+// isWaitingFunctionCall 判断 function_call 是否是需要用户介入的等待状态：
+// - AskUserQuestion：弹出选项让用户选择
+// - dangerouslyDisableSandbox: true 的工具调用：等待用户授权
+func isWaitingFunctionCall(entry *JSONLEntry) bool {
+	if entry.Name == "AskUserQuestion" {
+		return true
+	}
+	// 检查 arguments 中是否包含 dangerouslyDisableSandbox: true
+	if entry.Arguments != "" && strings.Contains(entry.Arguments, `"dangerouslyDisableSandbox":true`) {
+		return true
+	}
+	return false
+}
+
 // DetermineStateFromJSONL 根据 JSONL 文件内容判定 session 状态
 func DetermineStateFromJSONL(path string) protocol.SessionState {
 	// 1. 检查文件修改时间（5 秒内有修改 → 活跃）
@@ -116,12 +133,20 @@ func DetermineStateFromJSONL(path string) protocol.SessionState {
 	switch entry.Type {
 	case "message":
 		if entry.Role == "assistant" && entry.Status == "completed" {
-			return protocol.StateWaitingForInput
+			// 工作完成，不需要提醒
+			return protocol.StateActive
 		}
 		return protocol.StateActive // role=user 或 status!=completed
 
-	case "function_call", "function_call_result":
-		return protocol.StateActive // 工具调用中
+	case "function_call":
+		if isWaitingFunctionCall(entry) {
+			// 等待用户选择选项或授权
+			return protocol.StateWaitingForInput
+		}
+		return protocol.StateActive // 普通工具调用中
+
+	case "function_call_result":
+		return protocol.StateActive // 工具结果已返回，继续执行中
 
 	case "reasoning":
 		return protocol.StateActive // 推理中
