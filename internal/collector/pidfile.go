@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
-	"syscall"
 )
 
 // PIDFile 对应 ~/.codebuddy/sessions/<pid>.json 的结构
@@ -51,25 +49,6 @@ func ReadPIDFiles() ([]PIDFile, error) {
     return result, nil
 }
 
-// isProcessAlive 检测进程是否存活
-// Windows 下不支持 Unix signal，使用 OpenProcess 方式检测
-func isProcessAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		// Windows: FindProcess 总是成功，用 syscall.OpenProcess 检测真实存活状态
-		handle, err := syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(pid))
-		if err != nil {
-			return false
-		}
-		var exitCode uint32
-		err = syscall.GetExitCodeProcess(handle, &exitCode)
-		syscall.CloseHandle(handle)
-		// STILL_ACTIVE = 259，进程仍在运行
-		return err == nil && exitCode == 259
-	}
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil
-}
+// isProcessAlive 在平台特定文件中实现:
+//   - pidfile_windows.go: Windows 实现
+//   - pidfile_unix.go:   Unix/Linux 实现
