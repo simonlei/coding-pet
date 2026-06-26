@@ -1,3 +1,4 @@
+// Package collector 负责采集本机所有 CodeBuddy session 状态。
 package collector
 
 import (
@@ -52,6 +53,14 @@ func (c *Collector) collectOne(pf PIDFile) (protocol.SessionInfo, error) {
 			state = protocol.StateUnknown
 		} else {
 			state = DetermineStateFromJSONL(jsonlPath)
+
+			// 如果主 session 显示 active，检查 subagent 是否在等审批
+			// （subagent 的 dangerouslyDisableSandbox 调用不会反映在主 JSONL 中）
+			if state == protocol.StateActive {
+				if checkSubagentsForApproval(jsonlPath) {
+					state = protocol.StateWaitingForApproval
+				}
+			}
 		}
 	}
 

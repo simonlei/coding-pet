@@ -63,11 +63,20 @@ func main() {
 // report 采集并上报，失败只记录日志
 func report(c *collector.Collector, serverURL, token, machineID, hostname string) {
 	sessions := c.CollectSessions()
+
+	// 过滤已终止的 session，只上报活跃 session
+	var activeSessions []protocol.SessionInfo
+	for _, s := range sessions {
+		if s.State != protocol.StateTerminated {
+			activeSessions = append(activeSessions, s)
+		}
+	}
+
 	payload := protocol.AgentReport{
 		MachineID: machineID,
 		Hostname:  hostname,
 		ReportAt:  time.Now().UnixMilli(),
-		Sessions:  sessions,
+		Sessions:  activeSessions,
 		AgentVer:  version,
 	}
 

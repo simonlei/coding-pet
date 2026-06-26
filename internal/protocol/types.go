@@ -4,10 +4,11 @@ package protocol
 type SessionState string
 
 const (
-	StateActive          SessionState = "active"            // agent 正在工作
-	StateWaitingForInput SessionState = "waiting_for_input" // 等待用户输入
-	StateTerminated      SessionState = "terminated"        // 进程已退出
-	StateUnknown         SessionState = "unknown"           // 无法判定
+	StateActive             SessionState = "active"               // agent 正在工作
+	StateWaitingForInput    SessionState = "waiting_for_input"    // 等待用户输入
+	StateWaitingForApproval SessionState = "waiting_for_approval" // 等待审批
+	StateTerminated         SessionState = "terminated"           // 进程已退出
+	StateUnknown            SessionState = "unknown"              // 无法判定
 )
 
 // SessionKind 对应 CodeBuddy 的 kind 字段
@@ -45,7 +46,7 @@ type AgentReport struct {
 type MachineStatus struct {
 	MachineID    string        `json:"machine_id"`
 	Hostname     string        `json:"hostname"`
-	LastReport   int64         `json:"last_report"`   // Unix ms，Server 收到请求时的本地时间
+	LastReport   int64         `json:"last_report"` // Unix ms，Server 收到请求时的本地时间
 	Online       bool          `json:"online"`
 	OfflineSince int64         `json:"offline_since"` // Unix ms，首次掉线时间（0 表示在线）
 	Sessions     []SessionInfo `json:"sessions"`
@@ -53,10 +54,11 @@ type MachineStatus struct {
 
 // DashboardResponse Server 返回给前端的完整数据
 type DashboardResponse struct {
-	Timestamp     int64           `json:"timestamp"`      // Unix ms
+	Timestamp     int64           `json:"timestamp"` // Unix ms
 	Machines      []MachineStatus `json:"machines"`
 	TotalSessions int             `json:"total_sessions"`
 	ActiveCount   int             `json:"active_count"`
 	WaitingCount  int             `json:"waiting_count"`
-	OfflineCount  int             `json:"offline_count"` // 掉线机器数
+	ApprovalCount int             `json:"approval_count"` // 仅 waiting_for_approval 的 session 数
+	OfflineCount  int             `json:"offline_count"`  // 掉线机器数
 }

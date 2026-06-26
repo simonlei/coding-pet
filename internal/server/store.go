@@ -97,6 +97,9 @@ func (s *Store) GetDashboard() protocol.DashboardResponse {
 					resp.ActiveCount++
 				case protocol.StateWaitingForInput:
 					resp.WaitingCount++
+				case protocol.StateWaitingForApproval:
+					resp.ApprovalCount++
+					resp.WaitingCount++ // approval 也计入等待总数
 				}
 			}
 		}
@@ -125,7 +128,8 @@ func (s *Store) GetDashboard() protocol.DashboardResponse {
 
 func haswWaiting(m protocol.MachineStatus) bool {
 	for _, s := range m.Sessions {
-		if s.State == protocol.StateWaitingForInput {
+		if s.State == protocol.StateWaitingForInput ||
+			s.State == protocol.StateWaitingForApproval {
 			return true
 		}
 	}

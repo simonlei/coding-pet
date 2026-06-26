@@ -99,18 +99,28 @@ func readLastMeaningfulEntry(path string) (*JSONLEntry, error) {
 	return nil, nil
 }
 
-// isWaitingFunctionCall 判断 function_call 是否是需要用户介入的等待状态：
-// - AskUserQuestion：弹出选项让用户选择
-// - dangerouslyDisableSandbox: true 的工具调用：等待用户授权
-func isWaitingFunctionCall(entry *JSONLEntry) bool {
-	if entry.Name == "AskUserQuestion" {
-		return true
+// hasDangerouslyDisableSandbox 解析 arguments 中的 dangerouslyDisableSandbox 字段
+func hasDangerouslyDisableSandbox(args string) bool {
+	if args == "" {
+		return false
 	}
-	// 检查 arguments 中是否包含 dangerouslyDisableSandbox: true
-	if entry.Arguments != "" && strings.Contains(entry.Arguments, `"dangerouslyDisableSandbox":true`) {
-		return true
+	var parsed struct {
+		DangerouslyDisableSandbox bool `json:"dangerouslyDisableSandbox"`
 	}
-	return false
+	if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+		return false
+	}
+	return parsed.DangerouslyDisableSandbox
+}
+
+// isWaitingForInput 判断 function_call 是否需要用户提供信息或审批计划
+func isWaitingForInput(entry *JSONLEntry) bool {
+	return entry.Name == "AskUserQuestion" || entry.Name == "ExitPlanMode"
+}
+
+// isWaitingForApproval 判断 function_call 是否需要用户审批工具调用权限
+func isWaitingForApproval(entry *JSONLEntry) bool {
+	return hasDangerouslyDisableSandbox(entry.Arguments)
 }
 
 // DetermineStateFromJSONL 根据 JSONL 文件内容判定 session 状态
@@ -139,8 +149,10 @@ func DetermineStateFromJSONL(path string) protocol.SessionState {
 		return protocol.StateActive // role=user 或 status!=completed
 
 	case "function_call":
-		if isWaitingFunctionCall(entry) {
-			// 等待用户选择选项或授权
+		if isWaitingForApproval(entry) {
+			return protocol.StateWaitingForApproval
+		}
+		if isWaitingForInput(entry) {
 			return protocol.StateWaitingForInput
 		}
 		return protocol.StateActive // 普通工具调用中
@@ -154,4 +166,35 @@ func DetermineStateFromJSONL(path string) protocol.SessionState {
 	default:
 		return protocol.StateUnknown
 	}
+}
+
+// checkSubagentsForApproval 扫描 session 的 subagent JSONL，
+// 检查是否有 subagent 正在等待审批。
+// 路径推导：主 JSONL 路径去掉 .jsonl 后缀 + /subagents
+// 注：不做时间窗口过滤，因为用户可能 5 分钟后才回来审批，过滤会导致审批提示消失
+func checkSubagentsForApproval(jsonlPath string) bool {
+	sessionDir := strings.TrimSuffix(jsonlPath, ".jsonl")
+	subagentsDir := filepath.Join(sessionDir, "subagents")
+
+	entries, err := os.ReadDir(subagentsDir)
+	if err != nil {
+		return false
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		subagentPath := filepath.Join(subagentsDir, entry.Name())
+
+		subEntry, err := readLastMeaningfulEntry(subagentPath)
+		if err != nil || subEntry == nil {
+			continue
+		}
+
+		if subEntry.Type == "function_call" && isWaitingForApproval(subEntry) {
+			return true
+		}
+	}
+	return false
 }
