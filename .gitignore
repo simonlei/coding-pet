@@ -1,0 +1,20 @@
+# Go binaries (project-specific)
+/server
+/agent
+/dashboard-agent
+/dashboard-server
+
+# General Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# OS/Editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>CodeBuddy Dashboard</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 12px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      padding: 12px 0 16px;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 1px;
+    }
+
+    /* Stats Bar */
+    .stats {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      padding: 12px 16px;
+      background: #16213e;
+      border-radius: 10px;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+
+    .stat-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stat-value {
+      font-weight: 700;
+      font-size: 16px;
+    }
+
+    .stat-value.waiting {
+      color: #f59e0b;
+    }
+
+    .stat-value.active {
+      color: #10b981;
+    }
+
+    .stat-value.machines {
+      color: #60a5fa;
+    }
+
+    /* Section Title */
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 8px 4px 4px;
+    }
+
+    /* Waiting Section */
+    .waiting-section {
+      margin-bottom: 12px;
+    }
+
+    .waiting-section:empty {
+      display: none;
+    }
+
+    /* Machine Group */
+    .machine-group {
+      margin-bottom: 8px;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .machine-group.offline {
+      opacity: 0.6;
+      border: 1px solid #f97316;
+    }
+
+    .machine-group.online {
+      border: 1px solid transparent;
+    }
+
+    .machine-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: #16213e;
+      cursor: pointer;
+      user-select: none;
+      font-size: 14px;
+      transition: background 0.15s;
+    }
+
+    .machine-header:hover {
+      background: #1a2744;
+    }
+
+    .machine-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .machine-toggle {
+      font-size: 10px;
+      color: #64748b;
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+
+    .machine-toggle.expanded {
+      transform: rotate(0deg);
+    }
+
+    .machine-toggle.collapsed {
+      transform: rotate(-90deg);
+    }
+
+    .machine-name {
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .machine-badge {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    .machine-badge.online {
+      color: #10b981;
+    }
+
+    .machine-badge.offline {
+      color: #f97316;
+    }
+
+    .machine-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .machine-status-dot.online {
+      background: #10b981;
+    }
+
+    .machine-status-dot.offline {
+      background: #f97316;
+    }
+
+    /* Sessions Container */
+    .sessions-container {
+      overflow: hidden;
+      transition: max-height 0.25s ease;
+    }
+
+    .sessions-container.collapsed {
+      max-height: 0 !important;
+    }
+
+    /* Session Card */
+    .session-card {
+      display: flex;
+      align-items: stretch;
+      padding: 10px 14px;
+      background: #16213e;
+      border-top: 1px solid #1e2d4a;
+      font-size: 13px;
+      min-height: 52px;
+    }
+
+    .session-card:first-child {
+      border-top: 1px solid #1e2d4a;
+    }
+
+    .session-card.waiting {
+      background: #fef3c7;
+      color: #1a1a2e;
+      animation: pulse 1.5s ease-in-out infinite;
+      border-radius: 10px;
+      margin-bottom: 6px;
+      border-top: none;
+      border-left: none !important;
+    }
+
+    .session-card.active {
+      border-left: 4px solid #10b981;
+      border-top: none;
+    }
+
+    .session-card.terminated {
+      opacity: 0.5;
+    }
+
+    .session-card.unknown {
+      border-left: 4px solid #64748b;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.7;
+      }
+    }
+
+    /* Session Card Content */
+    .session-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .session-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 3px;
+      flex-wrap: wrap;
+    }
+
+    .session-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .session-label {
+      font-size: 11px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .session-card.waiting .session-label {
+      color: #92400e;
+    }
+
+    .session-cwd {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 13px;
+      font-weight: 600;
+      color: #93c5fd;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-card.waiting .session-cwd {
+      color: #1a1a2e;
+      font-weight: 700;
+    }
+
+    .session-meta {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    .session-card.waiting .session-meta {
+      color: #78350f;
+    }
+
+    .session-machine-prefix {
+      font-size: 12px;
+      font-weight: 600;
+      color: #f59e0b;
+      background: rgba(245, 158, 11, 0.15);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    .session-card.waiting .session-machine-prefix {
+      background: rgba(146, 64, 14, 0.15);
+      color: #92400e;
+    }
+
+    /* State Badge */
+    .state-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      flex-shrink: 0;
+    }
+
+    .state-badge.active {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+    }
+
+    .state-badge.waiting {
+      background: rgba(245, 158, 11, 0.15);
+      color: #d97706;
+    }
+
+    .state-badge.terminated {
+      background: rgba(100, 116, 139, 0.15);
+      color: #64748b;
+    }
+
+    .state-badge.unknown {
+      background: rgba(100, 116, 139, 0.1);
+      color: #64748b;
+    }
+
+    .session-card.waiting .state-badge {
+      display: none;
+    }
+
+    /* Loading / Error */
+    .loading {
+      text-align: center;
+      padding: 40px 20px;
+      color: #64748b;
+      font-size: 14px;
+    }
+
+    .loading .spinner {
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      border: 3px solid #1e2d4a;
+      border-top-color: #60a5fa;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 8px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .error-text {
+      text-align: center;
+      padding: 8px;
+      font-size: 12px;
+      color: #ef4444;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #64748b;
+      font-size: 14px;
+    }
+
+    /* Responsive */
+    @media (max-width: 480px) {
+      body {
+        padding: 8px;
+      }
+
+      .header h1 {
+        font-size: 17px;
+      }
+
+      .stats {
+        gap: 12px;
+        font-size: 13px;
+        padding: 10px 12px;
+      }
+
+      .stat-value {
+        font-size: 15px;
+      }
+
+      .session-card {
+        padding: 8px 12px;
+        font-size: 12px;
+      }
+
+      .machine-header {
+        padding: 8px 12px;
+        font-size: 13px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container" id="app">
+    <div class="header">
+      <h1>CodeBuddy Dashboard</h1>
+    </div>
+
+    <div class="stats" id="statsBar">
+      <div class="stat-item">
+        <span>等待:</span>
+        <span class="stat-value waiting" id="statWaiting">0</span>
+      </div>
+      <div class="stat-item">
+        <span>活跃:</span>
+        <span class="stat-value active" id="statActive">0</span>
+      </div>
+      <div class="stat-item">
+        <span>机器:</span>
+        <span class="stat-value machines" id="statMachines">0台</span>
+      </div>
+    </div>
+
+    <div id="waitingSection" class="waiting-section"></div>
+    <div class="section-title">机器列表</div>
+    <div id="machineList"></div>
+    <div id="loadingIndicator" class="loading">
+      <div class="spinner"></div>
+      <div>连接中...</div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var lastData = null;
+      var expandedMachines = {};
+
+      // ---- Utility ----
+
+      function basename(path) {
+        if (!path) {
+          return '';
+        }
+        var parts = path.replace(/\/+$/, '').split('/');
+        return parts[parts.length - 1] || '';
+      }
+
+      function msToDuration(ms) {
+        if (ms < 0) {
+          ms = 0;
+        }
+        var totalMinutes = Math.floor(ms / 60000);
+        if (totalMinutes < 60) {
+          return '运行 ' + totalMinutes + ' 分钟';
+        }
+        var hours = Math.floor(totalMinutes / 60);
+        var minutes = totalMinutes % 60;
+        if (minutes === 0) {
+          return '运行 ' + hours + ' 小时';
+        }
+        return '运行 ' + hours + ' 小时 ' + minutes + ' 分钟';
+      }
+
+      function msToAgo(ms) {
+        var diff = Date.now() - ms;
+        if (diff < 0) {
+          diff = 0;
+        }
+        var seconds = Math.floor(diff / 1000);
+        if (seconds < 60) {
+          return seconds + ' 秒前';
+        }
+        var minutes = Math.floor(seconds / 60);
+        if (minutes < 60) {
+          return minutes + ' 分钟前';
+        }
+        var hours = Math.floor(minutes / 60);
+        return hours + ' 小时前';
+      }
+
+      function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(text));
+        return div.innerHTML;
+      }
+
+      // ---- Render ----
+
+      function render(data) {
+        if (!data || !data.machines) {
+          return;
+        }
+
+        var waitingSessions = [];
+        var onlineMachines = [];
+        var offlineMachines = [];
+
+        data.machines.forEach(function (machine) {
+          if (machine.online) {
+            onlineMachines.push(machine);
+          } else {
+            offlineMachines.push(machine);
+          }
+
+          if (!machine.sessions) {
+            return;
+          }
+
+          machine.sessions.forEach(function (session) {
+            if (session.state === 'waiting_for_input') {
+              waitingSessions.push({
+                machine: machine,
+                session: session
+              });
+            }
+          });
+        });
+
+        // Sort online machines by last report (most recent first)
+        onlineMachines.sort(function (a, b) {
+          return b.last_report - a.last_report;
+        });
+
+        // Update stats
+        document.getElementById('statWaiting').textContent =
+          String(data.waiting_count != null ? data.waiting_count : 0);
+        document.getElementById('statActive').textContent =
+          String(data.active_count != null ? data.active_count : 0);
+        document.getElementById('statMachines').textContent =
+          String((data.machines ? data.machines.length : 0)) + '台';
+
+        // Render waiting section
+        renderWaitingSection(waitingSessions);
+
+        // Render machine list
+        renderMachineList(onlineMachines, offlineMachines);
+
+        // Hide loading
+        var loadingEl = document.getElementById('loadingIndicator');
+        if (loadingEl) {
+          loadingEl.style.display = 'none';
+        }
+      }
+
+      function renderWaitingSection(sessions) {
+        var container = document.getElementById('waitingSection');
+        var html = '';
+
+        if (sessions.length === 0) {
+          container.innerHTML = '';
+          return;
+        }
+
+        html += '<div class="section-title">⚡ 等待输入</div>';
+
+        sessions.forEach(function (item) {
+          var session = item.session;
+          var machine = item.machine;
+          var cwdShort = escapeHtml(basename(session.cwd));
+          var machineName = escapeHtml(machine.hostname || machine.machine_id);
+          var duration = msToDuration(Date.now() - session.started_at);
+          var lastActive = msToAgo(session.last_activity);
+
+          html += '<div class="session-card waiting">';
+          html += '<div class="session-content">';
+          html += '<div class="session-row">';
+          html += '<span class="session-machine-prefix">' + machineName + ' / ' + cwdShort + '</span>';
+          html += '</div>';
+          html += '<div class="session-row">';
+          html += '<span class="session-label">' + duration + '</span>';
+          html += ' &middot; ';
+          html += '<span class="session-label">' + lastActive + '</span>';
+          html += '</div>';
+          html += '</div>';
+          html += '</div>';
+        });
+
+        container.innerHTML = html;
+      }
+
+      function renderMachineList(onlineMachines, offlineMachines) {
+        var container = document.getElementById('machineList');
+        var html = '';
+        var allMachines = onlineMachines.concat(offlineMachines);
+
+        if (allMachines.length === 0) {
+          container.innerHTML = '<div class="empty-state">暂无机器连接</div>';
+          return;
+        }
+
+        allMachines.forEach(function (machine) {
+          var machineKey = machine.machine_id;
+          var isOnline = machine.online;
+          var isExpanded = expandedMachines[machineKey] !== false;
+
+          if (expandedMachines[machineKey] === undefined) {
+            expandedMachines[machineKey] = true;
+            isExpanded = true;
+          }
+
+          var displayName = escapeHtml(machine.hostname || machine.machine_id);
+          var sessionCount = machine.sessions ? machine.sessions.length : 0;
+          var statusClass = isOnline ? 'online' : 'offline';
+          var badgeHtml = '';
+
+          if (isOnline) {
+            badgeHtml = '在线，' + sessionCount + '个session';
+          } else {
+            var offlineSeconds = Math.floor((Date.now() - machine.offline_since) / 1000);
+            badgeHtml = '离线 ' + offlineSeconds + 's';
+          }
+
+          html += '<div class="machine-group ' + statusClass + '">';
+          html += '<div class="machine-header" data-machine="' + escapeHtml(machineKey) + '">';
+          html += '<div class="machine-header-left">';
+          html += '<span class="machine-status-dot ' + statusClass + '"></span>';
+          html += '<span class="machine-toggle ' + (isExpanded ? 'expanded' : 'collapsed') + '">▼</span>';
+          html += '<span class="machine-name">' + displayName + '</span>';
+          html += '</div>';
+          html += '<span class="machine-badge ' + statusClass + '">' + badgeHtml + '</span>';
+          html += '</div>';
+
+          // Sessions
+          var sessionHtml = '';
+          if (machine.sessions && machine.sessions.length > 0) {
+            machine.sessions.forEach(function (session) {
+              sessionHtml += renderSessionCard(session, machine);
+            });
+          }
+
+          html += '<div class="sessions-container' + (isExpanded ? '' : ' collapsed') + '"';
+          html += ' data-machine="' + escapeHtml(machineKey) + '">';
+          html += sessionHtml;
+          html += '</div>';
+          html += '</div>';
+        });
+
+        container.innerHTML = html;
+
+        // Attach click handlers
+        container.querySelectorAll('.machine-header').forEach(function (header) {
+          header.addEventListener('click', function () {
+            var machineId = header.getAttribute('data-machine');
+            var containerEl = container.querySelector(
+              '.sessions-container[data-machine="' + CSS.escape(machineId) + '"]'
+            );
+            var toggle = header.querySelector('.machine-toggle');
+
+            if (!containerEl) {
+              return;
+            }
+
+            var currentlyCollapsed = containerEl.classList.contains('collapsed');
+
+            if (currentlyCollapsed) {
+              containerEl.classList.remove('collapsed');
+              toggle.classList.remove('collapsed');
+              toggle.classList.add('expanded');
+              expandedMachines[machineId] = true;
+            } else {
+              containerEl.classList.add('collapsed');
+              toggle.classList.remove('expanded');
+              toggle.classList.add('collapsed');
+              expandedMachines[machineId] = false;
+            }
+          });
+        });
+      }
+
+      function renderSessionCard(session, machine) {
+        var cwdShort = escapeHtml(basename(session.cwd));
+        var duration = msToDuration(Date.now() - session.started_at);
+        var lastActive = msToAgo(session.last_activity);
+        var stateClass = session.state || 'unknown';
+        var stateLabel = '';
+
+        switch (stateClass) {
+          case 'active':
+            stateLabel = '活跃';
+            break;
+          case 'waiting_for_input':
+            stateLabel = '等待';
+            break;
+          case 'terminated':
+            stateLabel = '已终止';
+            break;
+          default:
+            stateLabel = '未知';
+            stateClass = 'unknown';
+        }
+
+        var html = '';
+        html += '<div class="session-card ' + stateClass + '">';
+        html += '<div class="session-content">';
+        html += '<div class="session-row">';
+        html += '<span class="session-cwd">' + cwdShort + '</span>';
+        html += '<span class="state-badge ' + stateClass + '">' + stateLabel + '</span>';
+        html += '</div>';
+        html += '<div class="session-row">';
+        html += '<span class="session-label">' + duration + '</span>';
+        html += ' &middot; ';
+        html += '<span class="session-label">最后活跃 ' + lastActive + '</span>';
+        html += '</div>';
+        html += '</div>';
+        html += '</div>';
+
+        return html;
+      }
+
+      // ---- Data Fetching ----
+
+      function fetchStatus() {
+        fetch('/api/status')
+          .then(function (res) {
+            if (!res.ok) {
+              throw new Error('HTTP ' + res.status);
+            }
+            return res.json();
+          })
+          .then(function (data) {
+            lastData = data;
+            render(data);
+          })
+          .catch(function () {
+            // Keep lastData on failure
+            if (lastData) {
+              render(lastData);
+            }
+          });
+      }
+
+      // ---- Init ----
+
+      // First fetch immediately
+      fetchStatus();
+
+      // Then poll every second
+      setInterval(fetchStatus, 1000);
+    })();
+  </script>
+</body>
+</html>
