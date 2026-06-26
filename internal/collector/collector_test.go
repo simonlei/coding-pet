@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
 // TestCollectOne_TagsCodeBuddyTool 验证采集出的 session 带 ToolCodeBuddy 标记，

@@ -10,8 +10,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/collector"
-	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/collector"
+	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
 const version = "0.1.0"
@@ -42,7 +42,7 @@ func main() {
 		actualMachineID = actualHostname
 	}
 
-	log.Printf("Starting dashboard-agent v%s, machine_id=%s, server=%s, interval=%s",
+	log.Printf("Starting coding-pet-agent v%s, machine_id=%s, server=%s, interval=%s",
 		version, actualMachineID, *serverURL, *interval)
 
 	c := collector.New()

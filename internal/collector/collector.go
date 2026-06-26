@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
 // Collector 负责采集本机所有 CodeBuddy session 状态

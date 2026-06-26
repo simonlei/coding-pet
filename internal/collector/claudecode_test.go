@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
 func TestMapClaudeStatus(t *testing.T) {

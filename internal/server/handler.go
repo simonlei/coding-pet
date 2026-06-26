@@ -5,7 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
 // Handler 持有 Store 引用

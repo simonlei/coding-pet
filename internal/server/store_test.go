@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
 // TestUpdateMachine_MixedToolsAggregate 验证两类工具的 session 都被存储，且计数跨工具聚合

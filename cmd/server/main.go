@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/server"
+	"github.com/simonlei/coding-pet-dashboard/internal/server"
 )
 
 const version = "0.1.0"
@@ -48,7 +48,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("dashboard-server v%s listening on %s", version, addr)
+		log.Printf("coding-pet-server v%s listening on %s", version, addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}

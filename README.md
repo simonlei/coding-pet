@@ -1,11 +1,11 @@
-# CodeBuddy Dashboard
+# Coding Pet Dashboard
 
-监控多台服务器上运行的 CodeBuddy CLI session 状态，展示在手机浏览器上。
+监控多台服务器上运行的 **CodeBuddy 与 Claude Code** CLI session 状态，展示在手机浏览器上。
 
 ## 功能
 
-- 显示所有机器上的 CodeBuddy session 数量和状态
-- 等待用户输入的 session **高亮闪烁提醒**
+- 显示所有机器上的 CodeBuddy / Claude Code session 数量和状态，按工具分组
+- 等待用户输入（权限、选择、计划审批等）的 session **高亮闪烁提醒**
 - 多机器支持：各开发机 Agent 上报到固定地址的中心 Server
 - 离线机器检测（90s 无上报标记为离线，24h 后清理）
 
@@ -20,25 +20,25 @@ make build
 ```
 
 编译产物：
-- `dashboard-agent`：运行在各开发机
-- `dashboard-server`：运行在中心服务器
+- `coding-pet-agent`：运行在各开发机
+- `coding-pet-server`：运行在中心服务器
 
 ## 部署
 
 ### 1. 启动中心服务（Server）
 
 ```bash
-./dashboard-server --port 3000 --token <your-secret>
+./coding-pet-server --port 3000 --token <your-secret>
 ```
 
 ### 2. 各开发机启动 Agent
 
 ```bash
 # 基本用法
-./dashboard-agent --server http://<中心服务器IP>:3000 --token <your-secret>
+./coding-pet-agent --server http://<中心服务器IP>:3000 --token <your-secret>
 
 # 多台机器 hostname 相同时，必须用 --id 指定唯一标识
-./dashboard-agent --server http://<中心服务器IP>:3000 --token <your-secret> --id dev-machine-01
+./coding-pet-agent --server http://<中心服务器IP>:3000 --token <your-secret> --id dev-machine-01
 ```
 
 或通过环境变量：
@@ -47,8 +47,10 @@ make build
 export DASHBOARD_SERVER=http://192.168.1.100:3000
 export DASHBOARD_TOKEN=mysecret
 export DASHBOARD_ID=my-machine
-./dashboard-agent
+./coding-pet-agent
 ```
+
+> Claude Code session 自动从 `$CLAUDE_CONFIG_DIR/sessions`（未设置时回退 `~/.tclaude/sessions`）采集，无需额外配置。
 
 ### 3. 手机访问仪表盘
 
@@ -59,14 +61,14 @@ http://<中心服务器IP>:3000
 
 ## 选项说明
 
-### dashboard-server
+### coding-pet-server
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--port` | 3000 | 监听端口 |
 | `--token` | 空（无认证） | 认证 token |
 
-### dashboard-agent
+### coding-pet-agent
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|

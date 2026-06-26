@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/simonlei/codebuddy-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
 // claudeStaleThresholdMs：statusUpdatedAt 超过此时间未更新视为已终止（与 CodeBuddy 心跳超时一致，60s）
