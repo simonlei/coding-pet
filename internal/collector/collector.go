@@ -18,20 +18,24 @@ func New() *Collector {
 
 // CollectSessions 扫描所有 PID 文件，返回 session 状态列表
 // 单个 session 异常时跳过，不返回错误
+// 同时采集 CodeBuddy 与 Claude Code 两类 session
 func (c *Collector) CollectSessions() []protocol.SessionInfo {
-	pidFiles, err := ReadPIDFiles()
-	if err != nil {
-		return nil
+	var sessions []protocol.SessionInfo
+
+	// 1. CodeBuddy sessions
+	if pidFiles, err := ReadPIDFiles(); err == nil {
+		for _, pf := range pidFiles {
+			info, err := c.collectOne(pf)
+			if err != nil {
+				continue
+			}
+			sessions = append(sessions, info)
+		}
 	}
 
-	var sessions []protocol.SessionInfo
-	for _, pf := range pidFiles {
-		info, err := c.collectOne(pf)
-		if err != nil {
-			continue
-		}
-		sessions = append(sessions, info)
-	}
+	// 2. Claude Code sessions（已带 ToolClaudeCode 标记）
+	sessions = append(sessions, CollectClaudeCodeSessions()...)
+
 	return sessions
 }
 
