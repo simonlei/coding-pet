@@ -4,6 +4,9 @@
 /coding-pet-agent
 /coding-pet-server
 
+# 运行日志
+/logs/
+
 # General Go build artifacts
 *.exe
 *.exe~
