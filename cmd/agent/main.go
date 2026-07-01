@@ -22,7 +22,7 @@ func main() {
 	token := flag.String("token", envOr("DASHBOARD_TOKEN", ""), "Auth token (optional)")
 	machineID := flag.String("id", envOr("DASHBOARD_ID", ""), "Unique machine ID (default: hostname)")
 	hostname := flag.String("hostname", "", "Display hostname (default: os.Hostname())")
-	interval := flag.Duration("interval", 5*time.Second, "Report interval")
+	interval := flag.Duration("interval", 1*time.Second, "Report interval")
 	flag.Parse()
 
 	if *serverURL == "" {
