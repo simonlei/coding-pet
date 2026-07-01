@@ -38,19 +38,30 @@ func TestMapClaudeStatus(t *testing.T) {
 	}
 }
 
-func TestClaudeConfigDir_EnvOverride(t *testing.T) {
+func TestClaudeConfigDirs_EnvOverride(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/custom/cfg")
-	if got := claudeConfigDir(); got != "/custom/cfg" {
-		t.Errorf("expected env override /custom/cfg, got %q", got)
+	got := claudeConfigDirs()
+	if len(got) != 1 || got[0] != "/custom/cfg" {
+		t.Errorf("expected env override [/custom/cfg], got %v", got)
 	}
 }
 
-func TestClaudeConfigDir_FallbackTclaude(t *testing.T) {
+func TestClaudeConfigDirs_FallbackThreeDirs(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home, _ := os.UserHomeDir()
-	want := filepath.Join(home, ".tclaude")
-	if got := claudeConfigDir(); got != want {
-		t.Errorf("expected fallback %q, got %q", want, got)
+	want := []string{
+		filepath.Join(home, ".claude-internal"),
+		filepath.Join(home, ".claude"),
+		filepath.Join(home, ".tclaude"),
+	}
+	got := claudeConfigDirs()
+	if len(got) != len(want) {
+		t.Fatalf("expected %d dirs, got %d: %v", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("dir[%d]=%q, want %q", i, got[i], want[i])
+		}
 	}
 }
 
@@ -182,6 +193,39 @@ func TestCollectClaudeCode_NoDir(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	if sessions := CollectClaudeCodeSessions(); sessions != nil {
 		t.Errorf("expected nil when sessions dir absent, got %v", sessions)
+	}
+}
+
+// TestReadClaudeCodePIDFilesFrom_MergeAndDedup 验证多目录扫描：
+// 多个配置目录下的 session 会被合并；同一 sessionId 在多个目录出现时只保留一份。
+func TestReadClaudeCodePIDFilesFrom_MergeAndDedup(t *testing.T) {
+	now := time.Now().UnixMilli()
+	pid := os.Getpid()
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	mk := func(sessionID string) string {
+		return `{"pid":` + itoa(pid) + `,"sessionId":"` + sessionID + `","cwd":"/tmp","startedAt":` +
+			i64toa(now) + `,"status":"busy","updatedAt":` + i64toa(now) + `,"statusUpdatedAt":` + i64toa(now) + `}`
+	}
+	writeClaudePID(t, dirA, "a.json", mk("sess-a"))
+	writeClaudePID(t, dirB, "b.json", mk("sess-b"))
+	// sess-a 在两个目录都出现，应去重
+	writeClaudePID(t, dirB, "dup.json", mk("sess-a"))
+
+	files := readClaudeCodePIDFilesFrom([]string{dirA, dirB})
+	seen := map[string]int{}
+	for _, f := range files {
+		seen[f.SessionID]++
+	}
+	if len(seen) != 2 {
+		t.Fatalf("expected 2 unique sessions, got %d: %v", len(seen), seen)
+	}
+	if seen["sess-a"] != 1 {
+		t.Errorf("expected sess-a deduped to 1, got %d", seen["sess-a"])
+	}
+	if seen["sess-b"] != 1 {
+		t.Errorf("expected sess-b present once, got %d", seen["sess-b"])
 	}
 }
 

@@ -1,7 +1,8 @@
 // Package collector 中 claudecode.go 负责采集本机所有 Claude Code session 状态。
 //
 // Claude Code 的磁盘布局与 CodeBuddy 类似但字段不同：
-//   - pid 文件位于 $CLAUDE_CONFIG_DIR/sessions/*.json（未设置时回退 ~/.tclaude/sessions）
+//   - pid 文件位于 $CLAUDE_CONFIG_DIR/sessions/*.json（未设置时回退扫描
+//     ~/.claude-internal、~/.claude、~/.tclaude 三个目录，按 sessionId 去重）
 //   - 没有 lastHeartbeat 字段，updatedAt/statusUpdatedAt 是事件驱动的（仅状态变化时写入），
 //     并非周期性心跳，因此不能用时间戳新鲜度判活；存活判定完全依赖进程是否存在
 //   - 状态来自 status 字段（busy/shell/idle/waiting），waiting 时附带 waitingFor 说明原因
@@ -30,43 +31,63 @@ type claudePIDFile struct {
 	StatusUpdatedAt int64  `json:"statusUpdatedAt"`
 }
 
-// claudeConfigDir 解析 Claude Code 配置目录：
-// 优先 $CLAUDE_CONFIG_DIR，未设置时回退 ~/.tclaude
-func claudeConfigDir() string {
+// claudeConfigDirs 解析 Claude Code 配置目录列表：
+// 优先 $CLAUDE_CONFIG_DIR（单目录）；未设置时回退扫描 ~/.claude-internal、~/.claude、~/.tclaude
+// 三个目录，任一目录下有运行中的 session 都会被采集。
+func claudeConfigDirs() []string {
 	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
-		return dir
+		return []string{dir}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		return nil
 	}
-	return filepath.Join(home, ".tclaude")
+	return []string{
+		filepath.Join(home, ".claude-internal"),
+		filepath.Join(home, ".claude"),
+		filepath.Join(home, ".tclaude"),
+	}
 }
 
-// readClaudeCodePIDFiles 扫描 <configDir>/sessions/*.json，单文件解析失败时跳过
-func readClaudeCodePIDFiles() []claudePIDFile {
-	configDir := claudeConfigDir()
-	if configDir == "" {
-		return nil
-	}
-	pattern := filepath.Join(configDir, "sessions", "*.json")
-	files, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil
-	}
+// readClaudeCodePIDFilesFrom 扫描给定配置目录列表下的 <dir>/sessions/*.json，
+// 合并结果并按 sessionId 去重（同一 session 在多个目录出现时只保留首个）；
+// 单文件解析失败时跳过。
+func readClaudeCodePIDFilesFrom(configDirs []string) []claudePIDFile {
 	var result []claudePIDFile
-	for _, f := range files {
-		data, err := os.ReadFile(f)
+	seen := make(map[string]bool)
+	for _, configDir := range configDirs {
+		if configDir == "" {
+			continue
+		}
+		pattern := filepath.Join(configDir, "sessions", "*.json")
+		files, err := filepath.Glob(pattern)
 		if err != nil {
 			continue
 		}
-		var pf claudePIDFile
-		if err := json.Unmarshal(data, &pf); err != nil {
-			continue
+		for _, f := range files {
+			data, err := os.ReadFile(f)
+			if err != nil {
+				continue
+			}
+			var pf claudePIDFile
+			if err := json.Unmarshal(data, &pf); err != nil {
+				continue
+			}
+			if pf.SessionID != "" {
+				if seen[pf.SessionID] {
+					continue
+				}
+				seen[pf.SessionID] = true
+			}
+			result = append(result, pf)
 		}
-		result = append(result, pf)
 	}
 	return result
+}
+
+// readClaudeCodePIDFiles 扫描所有回退/环境指定的配置目录下的 session pid 文件
+func readClaudeCodePIDFiles() []claudePIDFile {
+	return readClaudeCodePIDFilesFrom(claudeConfigDirs())
 }
 
 // mapClaudeStatus 将 Claude Code 的 status + waitingFor 映射到 SessionState。
