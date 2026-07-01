@@ -58,6 +58,10 @@ func (c *Collector) collectOne(pf PIDFile) (protocol.SessionInfo, error) {
 		} else {
 			state = DetermineStateFromJSONL(jsonlPath)
 
+			// 用运行日志状态机校正：JSONL 只能看到「末尾悬空 function_call」这类
+			// 粗信号，日志能精确区分「等待授权」与「刚发起调用、实际在执行」。
+			state = reconcileWithRunState(state, lastRunState(pf.SessionID))
+
 			// 如果主 session 显示 active，检查 subagent 是否在等审批
 			// （subagent 的 dangerouslyDisableSandbox 调用不会反映在主 JSONL 中）
 			if state == protocol.StateActive {

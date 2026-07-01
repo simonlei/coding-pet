@@ -149,13 +149,15 @@ func DetermineStateFromJSONL(path string) protocol.SessionState {
 		return protocol.StateActive // role=user 或 status!=completed
 
 	case "function_call":
-		if isWaitingForApproval(entry) {
-			return protocol.StateWaitingForApproval
-		}
 		if isWaitingForInput(entry) {
 			return protocol.StateWaitingForInput
 		}
-		return protocol.StateActive // 普通工具调用中
+		// 末尾是悬空的 function_call（后面没有 function_call_result），
+		// 说明该工具调用尚未执行——绝大多数情况是在等待用户授权（含
+		// dangerouslyDisableSandbox 沙箱降级、以及 WebFetch/Bash 等普通工具
+		// 的权限弹窗）。日志状态机层（collectOne 中的 lastRunState）会对
+		// 「刚发起调用、实际在执行中」的瞬态误判做纠正。
+		return protocol.StateWaitingForApproval
 
 	case "function_call_result":
 		return protocol.StateActive // 工具结果已返回，继续执行中

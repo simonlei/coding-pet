@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	// offlineThreshold：超过此时间无上报视为离线（90s，给 Agent 5s 上报周期 18 次机会）
+	// offlineThreshold：超过此时间无上报视为离线（90s，给 Agent 1s 上报周期 90 次机会）
 	offlineThreshold = 90 * time.Second
 	// offlineTTL：离线超过此时间后从 Store 清理
 	offlineTTL = 24 * time.Hour
