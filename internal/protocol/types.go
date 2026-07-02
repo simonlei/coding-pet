@@ -24,8 +24,8 @@ const (
 type SessionTool string
 
 const (
-	ToolCodeBuddy    SessionTool = "codebuddy"     // CodeBuddy CLI / CodeBuddy IDE（agent home ~/.codebuddy）
-	ToolWorkBuddy    SessionTool = "workbuddy"     // WorkBuddy IDE（agent home ~/.workbuddy）
+	ToolCodeBuddy    SessionTool = "codebuddy"     // CodeBuddy CLI（agent home ~/.codebuddy）
+	ToolWorkBuddy    SessionTool = "workbuddy"     // WorkBuddy IDE（通过 Hook 上报）
 	ToolClaudeCode   SessionTool = "claude_code"   // Claude Code CLI
 	ToolCodeBuddyIDE SessionTool = "codebuddy_ide" // CodeBuddy / WorkBuddy IDE 通过 Hook 上报（无 CLI PID 文件）
 )

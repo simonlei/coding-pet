@@ -22,8 +22,8 @@ func New() *Collector {
 func (c *Collector) CollectSessions() []protocol.SessionInfo {
 	var sessions []protocol.SessionInfo
 
-	// 1. CodeBuddy 系列（CodeBuddy CLI/IDE 用 ~/.codebuddy，WorkBuddy IDE 用 ~/.workbuddy）
-	//    两者磁盘布局一致，复用同一套判定逻辑，仅 base 目录与工具标签不同。
+	// 1. CodeBuddy CLI（agent home ~/.codebuddy，扫描 sessions/ PID 文件 + JSONL + 运行日志）
+	//    CodeBuddy IDE / WorkBuddy IDE 的实时状态改由 Hook 上报，见下方第 3 步。
 	for _, h := range buddyHomes() {
 		for _, pf := range readPIDFilesFrom(h.dir) {
 			info, err := c.collectOne(h, pf)

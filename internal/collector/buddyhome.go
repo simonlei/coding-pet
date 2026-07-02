@@ -9,17 +9,13 @@ import (
 
 // buddyHome 描述一个 CodeBuddy 系列工具的 agent home 目录及其工具标签。
 //
-// CodeBuddy CLI 与 CodeBuddy IDE（含 CodeBuddy CN）共用 ~/.codebuddy；
-// WorkBuddy IDE 使用 ~/.workbuddy。两者磁盘布局完全一致：
+// CodeBuddy CLI 使用 ~/.codebuddy，磁盘布局：
 //   - sessions/<pid>.json      —— PID + lastHeartbeat（判活）
 //   - projects/<name>/<sid>.jsonl —— 对话记录（判「等待选择/输入」）
 //   - logs/<date>/*.log        —— SessionRunStateMachine（判「等待授权」）
 //
-// 因此复用同一套解析逻辑，仅 base 目录与工具标签不同。
-//
-// 注：IDE 侧的 codebuddy-sessions.vscdb / workbuddy.db 仅存「已完成」的历史会话
-// 元数据（status 只有 completed），不含实时的「等待用户」状态——IDE 代码自身也把
-// vscdb 标注为 legacy、以 projects/ sidecar 为准，故实时状态一律走上述文件布局判定。
+// 注：CodeBuddy IDE 与 WorkBuddy IDE 的实时状态已改由官方 Hook 主动上报
+// （见 ide_hook_store.go），不再扫描磁盘，故此处只保留 CLI 的 agent home。
 type buddyHome struct {
 	dir  string               // agent home 绝对路径
 	tool protocol.SessionTool // 采集出的 session 打的工具标签
@@ -34,6 +30,5 @@ func buddyHomes() []buddyHome {
 	}
 	return []buddyHome{
 		{dir: filepath.Join(home, ".codebuddy"), tool: protocol.ToolCodeBuddy},
-		{dir: filepath.Join(home, ".workbuddy"), tool: protocol.ToolWorkBuddy},
 	}
 }
