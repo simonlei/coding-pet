@@ -732,11 +732,12 @@
       // 工具显示名映射
       var TOOL_LABELS = {
         codebuddy: 'CodeBuddy',
+        workbuddy: 'WorkBuddy',
         claude_code: 'Claude Code'
       };
 
       // 工具分组顺序：已知工具优先，其余按出现顺序追加
-      var TOOL_ORDER = ['codebuddy', 'claude_code'];
+      var TOOL_ORDER = ['codebuddy', 'workbuddy', 'claude_code'];
 
       function renderSessionsByTool(sessions, machine) {
         // 过滤已终止，按 tool 分组（未知 tool 视为 codebuddy）

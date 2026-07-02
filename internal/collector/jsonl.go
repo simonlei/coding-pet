@@ -36,7 +36,13 @@ func findSessionJSONL(sessionID string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	projectsDir := filepath.Join(homeDir, ".codebuddy", "projects")
+	return findSessionJSONLIn(filepath.Join(homeDir, ".codebuddy"), sessionID)
+}
+
+// findSessionJSONLIn 在指定 agent home 的 projects/<name>/<sessionID>.jsonl 查找。
+// 注意：直接在 project 目录下找，没有 sessions 子目录。
+func findSessionJSONLIn(baseDir, sessionID string) (string, bool) {
+	projectsDir := filepath.Join(baseDir, "projects")
 	entries, err := os.ReadDir(projectsDir)
 	if err != nil {
 		return "", false

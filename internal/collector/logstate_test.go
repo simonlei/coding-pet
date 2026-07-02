@@ -9,9 +9,8 @@ import (
 // TestLastRunState_WaitingForPermission 验证：能从日志中解出该 session
 // 最后一条状态机 transition 的 to= 状态。
 func TestLastRunState_WaitingForPermission(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	logDir := filepath.Join(home, ".codebuddy", "logs", "2026-06-29")
+	base := t.TempDir()
+	logDir := filepath.Join(base, "logs", "2026-06-29")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +23,7 @@ func TestLastRunState_WaitingForPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := lastRunState(sid); got != "waiting_for_permission" {
+	if got := lastRunStateIn(base, sid); got != "waiting_for_permission" {
 		t.Errorf("expected waiting_for_permission, got %q", got)
 	}
 }
@@ -32,9 +31,8 @@ func TestLastRunState_WaitingForPermission(t *testing.T) {
 // TestLastRunState_PicksSessionAndLatestFile 验证：多 session 混写、多日志文件时，
 // 只取目标 session 的最后一条 transition，且以最新 mtime 的文件为准。
 func TestLastRunState_PicksSessionAndLatestFile(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	logDir := filepath.Join(home, ".codebuddy", "logs", "2026-06-29")
+	base := t.TempDir()
+	logDir := filepath.Join(base, "logs", "2026-06-29")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -48,16 +46,15 @@ func TestLastRunState_PicksSessionAndLatestFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := lastRunState(sid); got != "tool_executing" {
+	if got := lastRunStateIn(base, sid); got != "tool_executing" {
 		t.Errorf("expected tool_executing, got %q", got)
 	}
 }
 
 // TestLastRunState_NoMatch 验证：无匹配日志时返回空串。
 func TestLastRunState_NoMatch(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	if got := lastRunState("nonexistent-session"); got != "" {
+	base := t.TempDir()
+	if got := lastRunStateIn(base, "nonexistent-session"); got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
 }
