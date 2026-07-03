@@ -40,6 +40,10 @@ func (c *Collector) CollectSessions() []protocol.SessionInfo {
 	// 3. CodeBuddy / WorkBuddy IDE sessions（由 hook 主动上报，从内存 store 读取）
 	sessions = append(sessions, CollectCodeBuddyIDESessions()...)
 
+	// 4. WorkBuddy 桌面版（SQLite 库 ~/.workbuddy/workbuddy.db 的 sessions 表，
+	//    status 字段直读，无需 Hook）
+	sessions = append(sessions, CollectWorkBuddyDBSessions()...)
+
 	return sessions
 }
 
