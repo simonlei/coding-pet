@@ -262,6 +262,18 @@
       border-top: none;
     }
 
+    /* Hook 工具等待超时后的“已完成”降级态：淡黄静态，不闪烁、不置顶 */
+    .session-card.ide-done {
+      border-left: 4px solid #d97706;
+      border-top: none;
+      background: #2a2a1e;
+    }
+
+    .state-badge.ide-done {
+      background: rgba(217, 119, 6, 0.18);
+      color: #eab308;
+    }
+
     .session-card.terminated {
       opacity: 0.5;
     }
@@ -492,6 +504,27 @@
       var lastData = null;
       var expandedMachines = {};
 
+      // 基于 Hook 上报、磁盘上无 PID 文件、无法感知 IDE 关闭的工具。
+      // 这类会话进入 waiting_for_input 后若 IDE 被直接关闭，只能靠时间衰减，
+      // 因此顶部闪烁提醒不宜长期占用（详见 ide_hook_store.go 的 30 分钟 TTL）。
+      var HOOK_ONLY_TOOLS = { codebuddy_ide: true, workbuddy: true };
+
+      // Hook 类工具进入“等待输入”超过此时长后，认为多半已完成/IDE 已关闭：
+      // 撤下顶部金黄闪烁提醒，仅在机器列表里以淡黄色“已完成”卡片保留。
+      var IDE_DONE_AFTER_MS = 3 * 60 * 1000;
+
+      // 判断某会话是否为“Hook 工具已完成、应降级展示”的状态。
+      function isHookWaitingDone(session) {
+        if (!session || session.state !== 'waiting_for_input') {
+          return false;
+        }
+        if (!HOOK_ONLY_TOOLS[session.tool]) {
+          return false;
+        }
+        var last = session.last_activity || 0;
+        return (Date.now() - last) > IDE_DONE_AFTER_MS;
+      }
+
       // ---- Utility ----
 
       function basename(path) {
@@ -571,6 +604,10 @@
                 session: session
               });
             } else if (session.state === 'waiting_for_input') {
+              // Hook 类工具等待超时后不再置顶闪烁，改为机器列表内淡黄色降级展示。
+              if (isHookWaitingDone(session)) {
+                return;
+              }
               waitingSessions.push({
                 machine: machine,
                 session: session
@@ -580,8 +617,10 @@
         });
 
         // Update stats
+        // 等待数用前端过滤后的结果，与顶部“等待输入”区保持一致
+        // （Hook 工具超时降级的会话不再计入）。
         document.getElementById('statWaiting').textContent =
-          String(data.waiting_count != null ? data.waiting_count : 0);
+          String(waitingSessions.length);
         document.getElementById('statApproval').textContent =
           String(data.approval_count != null ? data.approval_count : 0);
         document.getElementById('statActive').textContent =
@@ -781,22 +820,28 @@
         var stateClass = session.state || 'unknown';
         var stateLabel = '';
 
-        switch (stateClass) {
-          case 'active':
-            stateLabel = '活跃';
-            break;
-          case 'waiting_for_input':
-            stateLabel = '等待';
-            break;
-          case 'waiting_for_approval':
-            stateLabel = '审批';
-            break;
-          case 'terminated':
-            stateLabel = '已终止';
-            break;
-          default:
-            stateLabel = '未知';
-            stateClass = 'unknown';
+        // Hook 工具等待超时：降级为“已完成”淡黄卡片（不闪烁、不置顶）。
+        if (isHookWaitingDone(session)) {
+          stateClass = 'ide-done';
+          stateLabel = '已完成';
+        } else {
+          switch (stateClass) {
+            case 'active':
+              stateLabel = '活跃';
+              break;
+            case 'waiting_for_input':
+              stateLabel = '等待';
+              break;
+            case 'waiting_for_approval':
+              stateLabel = '审批';
+              break;
+            case 'terminated':
+              stateLabel = '已终止';
+              break;
+            default:
+              stateLabel = '未知';
+              stateClass = 'unknown';
+          }
         }
 
         var html = '';
