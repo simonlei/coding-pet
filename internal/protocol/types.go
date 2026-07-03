@@ -20,12 +20,14 @@ const (
 	KindDaemon      SessionKind = "daemon"
 )
 
-// SessionTool 标识 session 来源工具（CodeBuddy / Claude Code）
+// SessionTool 标识 session 来源工具（CodeBuddy / WorkBuddy / Claude Code）
 type SessionTool string
 
 const (
-	ToolCodeBuddy  SessionTool = "codebuddy"   // CodeBuddy CLI
-	ToolClaudeCode SessionTool = "claude_code" // Claude Code CLI
+	ToolCodeBuddy    SessionTool = "codebuddy"     // CodeBuddy CLI（agent home ~/.codebuddy）
+	ToolWorkBuddy    SessionTool = "workbuddy"     // WorkBuddy IDE（通过 Hook 上报）
+	ToolClaudeCode   SessionTool = "claude_code"   // Claude Code CLI
+	ToolCodeBuddyIDE SessionTool = "codebuddy_ide" // CodeBuddy / WorkBuddy IDE 通过 Hook 上报（无 CLI PID 文件）
 )
 
 // SessionInfo 单个 CodeBuddy session 的状态

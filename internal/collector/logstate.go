@@ -28,14 +28,20 @@ const runStateReadTail = 65536
 // 日志位于 ~/.codebuddy/logs/<date>/*.log，同一 session 的行可能分布在
 // 多个文件中，取含该 session 且 mtime 最新的文件的最后一条 transition。
 func lastRunState(sessionID string) string {
-	if sessionID == "" {
-		return ""
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	logsRoot := filepath.Join(home, ".codebuddy", "logs")
+	return lastRunStateIn(filepath.Join(home, ".codebuddy"), sessionID)
+}
+
+// lastRunStateIn 在指定 agent home 的 logs/<date>/*.log 中查找该 session
+// 最后一条状态机 transition 的目标状态。找不到时返回空串。
+func lastRunStateIn(baseDir, sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	logsRoot := filepath.Join(baseDir, "logs")
 
 	files, err := filepath.Glob(filepath.Join(logsRoot, "*", "*.log"))
 	if err != nil || len(files) == 0 {

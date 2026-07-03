@@ -45,6 +45,14 @@ func main() {
 	log.Printf("Starting coding-pet-agent v%s, machine_id=%s, server=%s, interval=%s",
 		version, actualMachineID, *serverURL, *interval)
 
+	// 启动本地 IDE Hook HTTP 服务（127.0.0.1:38765，可通过 DASHBOARD_IDE_HOOK_ADDR 覆盖）。
+	// 失败不影响主流程：即使端口被占用，CLI 采集仍然正常工作。
+	if actualAddr, err := collector.StartIDEHookServer(""); err != nil {
+		log.Printf("IDE hook server disabled: %v", err)
+	} else {
+		log.Printf("IDE hook server listening on http://%s (POST /ide/hook)", actualAddr)
+	}
+
 	c := collector.New()
 
 	// 定时采集 + fire-and-forget 上报

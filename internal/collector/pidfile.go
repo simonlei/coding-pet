@@ -28,11 +28,17 @@ func ReadPIDFiles() ([]PIDFile, error) {
     if err != nil {
         return nil, err
     }
-    sessionsDir := filepath.Join(homeDir, ".codebuddy", "sessions")
+    return readPIDFilesFrom(filepath.Join(homeDir, ".codebuddy")), nil
+}
+
+// readPIDFilesFrom 扫描指定 agent home 下的 sessions/*.json，返回所有 PIDFile。
+// 目录不存在或单文件解析失败时跳过。
+func readPIDFilesFrom(baseDir string) []PIDFile {
+    sessionsDir := filepath.Join(baseDir, "sessions")
     pattern := filepath.Join(sessionsDir, "*.json")
     files, err := filepath.Glob(pattern)
     if err != nil {
-        return nil, err
+        return nil
     }
     var result []PIDFile
     for _, f := range files {
@@ -46,7 +52,7 @@ func ReadPIDFiles() ([]PIDFile, error) {
         }
         result = append(result, pf)
     }
-    return result, nil
+    return result
 }
 
 // isProcessAlive 在平台特定文件中实现:

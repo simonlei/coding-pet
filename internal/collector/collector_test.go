@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func TestCollectOne_TagsCodeBuddyTool(t *testing.T) {
 		Version:       "1.0.0",
 	}
 
-	info, err := c.collectOne(pf)
+	info, err := c.collectOne(buddyHome{dir: "/nonexistent", tool: protocol.ToolCodeBuddy}, pf)
 	if err != nil {
 		t.Fatalf("collectOne error: %v", err)
 	}
@@ -36,5 +37,22 @@ func TestCollectOne_TagsCodeBuddyTool(t *testing.T) {
 	}
 	if info.SessionID != pf.SessionID {
 		t.Errorf("expected SessionID=%q, got %q", pf.SessionID, info.SessionID)
+	}
+}
+
+// TestBuddyHomes_OnlyCodeBuddyCLI 验证磁盘扫描列表只含 ~/.codebuddy（CodeBuddy CLI）。
+// CodeBuddy IDE / WorkBuddy IDE 的实时状态已改由 Hook 上报，不再扫描 ~/.workbuddy。
+func TestBuddyHomes_OnlyCodeBuddyCLI(t *testing.T) {
+	homes := buddyHomes()
+	byTool := map[protocol.SessionTool]string{}
+	for _, h := range homes {
+		byTool[h.tool] = h.dir
+	}
+
+	if dir, ok := byTool[protocol.ToolCodeBuddy]; !ok || filepath.Base(dir) != ".codebuddy" {
+		t.Errorf("expected a codebuddy home ending in .codebuddy, got %q (present=%v)", dir, ok)
+	}
+	if _, ok := byTool[protocol.ToolWorkBuddy]; ok {
+		t.Errorf("did not expect a workbuddy home to be scanned (now Hook-reported)")
 	}
 }
