@@ -40,8 +40,9 @@ func TestCollectOne_TagsCodeBuddyTool(t *testing.T) {
 	}
 }
 
-// TestBuddyHomes_OnlyCodeBuddyCLI 验证磁盘扫描列表只含 ~/.codebuddy（CodeBuddy CLI）。
-// CodeBuddy IDE / WorkBuddy IDE 的实时状态已改由 Hook 上报，不再扫描 ~/.workbuddy。
+// TestBuddyHomes_OnlyCodeBuddyCLI 验证 PID 文件磁盘扫描列表只含 ~/.codebuddy
+// （CodeBuddy CLI）。CodeBuddy IDE 的实时状态由 Hook 上报；WorkBuddy 桌面版则
+// 改由 SQLite 采集（见 workbuddy_db.go），二者都不走 buddyHomes() 的 PID 路径。
 func TestBuddyHomes_OnlyCodeBuddyCLI(t *testing.T) {
 	homes := buddyHomes()
 	byTool := map[protocol.SessionTool]string{}

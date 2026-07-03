@@ -23,7 +23,7 @@ func (c *Collector) CollectSessions() []protocol.SessionInfo {
 	var sessions []protocol.SessionInfo
 
 	// 1. CodeBuddy CLI（agent home ~/.codebuddy，扫描 sessions/ PID 文件 + JSONL + 运行日志）
-	//    CodeBuddy IDE / WorkBuddy IDE 的实时状态改由 Hook 上报，见下方第 3 步。
+	//    CodeBuddy IDE 的状态改由磁盘 history 目录扫描，见下方第 3 步。
 	for _, h := range buddyHomes() {
 		for _, pf := range readPIDFilesFrom(h.dir) {
 			info, err := c.collectOne(h, pf)
@@ -37,8 +37,12 @@ func (c *Collector) CollectSessions() []protocol.SessionInfo {
 	// 2. Claude Code sessions（已带 ToolClaudeCode 标记）
 	sessions = append(sessions, CollectClaudeCodeSessions()...)
 
-	// 3. CodeBuddy / WorkBuddy IDE sessions（由 hook 主动上报，从内存 store 读取）
+	// 3. CodeBuddy IDE sessions（扫描 CodeBuddyExtension 的 history 目录，见 codebuddy_ide.go）
 	sessions = append(sessions, CollectCodeBuddyIDESessions()...)
+
+	// 4. WorkBuddy 桌面版（SQLite 库 ~/.workbuddy/workbuddy.db 的 sessions 表，
+	//    status 字段直读，无需 Hook）
+	sessions = append(sessions, CollectWorkBuddyDBSessions()...)
 
 	return sessions
 }

@@ -14,8 +14,9 @@ import (
 //   - projects/<name>/<sid>.jsonl —— 对话记录（判「等待选择/输入」）
 //   - logs/<date>/*.log        —— SessionRunStateMachine（判「等待授权」）
 //
-// 注：CodeBuddy IDE 与 WorkBuddy IDE 的实时状态已改由官方 Hook 主动上报
-// （见 ide_hook_store.go），不再扫描磁盘，故此处只保留 CLI 的 agent home。
+// 注：CodeBuddy IDE 与 WorkBuddy 桌面版的状态由各自的专用采集器处理
+// （分别见 codebuddy_ide.go 扫 history 目录、workbuddy_db.go 读 SQLite），
+// 不走这里的 CLI agent home，故此处只保留 CLI 的 agent home。
 type buddyHome struct {
 	dir  string               // agent home 绝对路径
 	tool protocol.SessionTool // 采集出的 session 打的工具标签
