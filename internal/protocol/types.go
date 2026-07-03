@@ -25,9 +25,9 @@ type SessionTool string
 
 const (
 	ToolCodeBuddy    SessionTool = "codebuddy"     // CodeBuddy CLI（agent home ~/.codebuddy）
-	ToolWorkBuddy    SessionTool = "workbuddy"     // WorkBuddy IDE（通过 Hook 上报）
+	ToolWorkBuddy    SessionTool = "workbuddy"     // WorkBuddy 桌面版（读 ~/.workbuddy/workbuddy.db）
 	ToolClaudeCode   SessionTool = "claude_code"   // Claude Code CLI
-	ToolCodeBuddyIDE SessionTool = "codebuddy_ide" // CodeBuddy / WorkBuddy IDE 通过 Hook 上报（无 CLI PID 文件）
+	ToolCodeBuddyIDE SessionTool = "codebuddy_ide" // CodeBuddy IDE（扫 CodeBuddyExtension 的 history 目录）
 )
 
 // SessionInfo 单个 CodeBuddy session 的状态

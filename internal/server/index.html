@@ -504,9 +504,9 @@
       var lastData = null;
       var expandedMachines = {};
 
-      // 基于 Hook 上报、磁盘上无 PID 文件、无法感知 IDE 关闭的工具。
-      // 这类会话进入 waiting_for_input 后若 IDE 被直接关闭，只能靠时间衰减，
-      // 因此顶部闪烁提醒不宜长期占用（详见 ide_hook_store.go 的 30 分钟 TTL）。
+      // 磁盘上无 PID 文件、无法感知 IDE 关闭的工具（CodeBuddy IDE 扫 history 目录、
+      // WorkBuddy 读 SQLite）。这类会话进入 waiting_for_input 后若 IDE 被直接关闭，
+      // 只能靠时间衰减，因此顶部闪烁提醒不宜长期占用（采集端 30 分钟后即不再上报）。
       var HOOK_ONLY_TOOLS = { codebuddy_ide: true, workbuddy: true };
 
       // Hook 类工具进入“等待输入”超过此时长后，认为多半已完成/IDE 已关闭：
