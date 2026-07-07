@@ -84,6 +84,39 @@ func TestParseWorkspaceFolder(t *testing.T) {
 	}
 }
 
+// TestCodebuddyIDEContextTokens 覆盖 usage.lastTokens 的回溯取值逻辑，
+// 走真实采集路径（构造 index.json → collectCodeBuddyIDEWorkspace）验证 ContextTokens。
+func TestCodebuddyIDEContextTokens(t *testing.T) {
+	nowMs := time.Now().UnixMilli()
+
+	cases := []struct {
+		name   string
+		states []string
+		tokens []int64
+		want   int64
+	}{
+		{"单轮取 lastTokens", []string{"complete"}, []int64{20897}, 20897},
+		{"多轮取最后一轮", []string{"complete", "complete"}, []int64{20610, 51613}, 51613},
+		{"末轮running无usage → 回溯上一轮", []string{"complete", "running"}, []int64{62487, 0}, 62487},
+		{"全部无usage → 0（优雅降级）", []string{"running"}, nil, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wsDir := t.TempDir()
+			makeConversationWithTokens(t, wsDir, "conv", tc.states, tc.tokens, "/p", 10*1000)
+			writeJSON(t, filepath.Join(wsDir, "index.json"), map[string]string{"current": "conv"})
+
+			info, ok := collectCodeBuddyIDEWorkspace(wsDir, nowMs)
+			if !ok {
+				t.Fatal("expected a session")
+			}
+			if info.ContextTokens != tc.want {
+				t.Errorf("ContextTokens = %d, want %d", info.ContextTokens, tc.want)
+			}
+		})
+	}
+}
+
 // writeJSON 是测试辅助：把 v 写成 JSON 文件（含父目录）。
 func writeJSON(t *testing.T, path string, v any) {
 	t.Helper()
@@ -103,14 +136,26 @@ func writeJSON(t *testing.T, path string, v any) {
 // 并把会话 index.json 的 mtime 设成 now-ageMs，返回会话 id。
 func makeConversation(t *testing.T, wsDir, convID string, requestStates []string, workspaceFolder string, ageMs int64) {
 	t.Helper()
+	makeConversationWithTokens(t, wsDir, convID, requestStates, nil, workspaceFolder, ageMs)
+}
+
+// makeConversationWithTokens 同 makeConversation，但可为每个 request 指定 usage.lastTokens。
+// lastTokens 为 nil 时不写 usage 字段（模拟 running 轮次或旧数据）；否则按下标一一对应，
+// 值 <=0 也不写 usage（模拟该轮无占用）。
+func makeConversationWithTokens(t *testing.T, wsDir, convID string, requestStates []string, lastTokens []int64, workspaceFolder string, ageMs int64) {
+	t.Helper()
 	convDir := filepath.Join(wsDir, convID)
 
 	type msgRef struct {
 		ID   string `json:"id"`
 		Role string `json:"role"`
 	}
+	type usageRef struct {
+		LastTokens int64 `json:"lastTokens"`
+	}
 	type reqRef struct {
-		State string `json:"state"`
+		State string    `json:"state"`
+		Usage *usageRef `json:"usage,omitempty"`
 	}
 	idx := struct {
 		Messages []msgRef `json:"messages"`
@@ -123,8 +168,12 @@ func makeConversation(t *testing.T, wsDir, convID string, requestStates []string
 		writeJSON(t, filepath.Join(convDir, "messages", "m1.json"),
 			map[string]string{"role": "user", "message": body})
 	}
-	for _, s := range requestStates {
-		idx.Requests = append(idx.Requests, reqRef{State: s})
+	for i, s := range requestStates {
+		r := reqRef{State: s}
+		if i < len(lastTokens) && lastTokens[i] > 0 {
+			r.Usage = &usageRef{LastTokens: lastTokens[i]}
+		}
+		idx.Requests = append(idx.Requests, r)
 	}
 
 	convIndexPath := filepath.Join(convDir, "index.json")

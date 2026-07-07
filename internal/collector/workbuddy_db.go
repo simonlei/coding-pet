@@ -16,6 +16,9 @@
 //
 // 前端 HOOK_ONLY_TOOLS = { codebuddy_ide, workbuddy } 已有 3 分钟降级逻辑，
 // 采集端只要打上 Tool=workbuddy 并给对 state，即自动复用该展示分层。
+//
+// 当前上下文占用 token 取自同库的 session_usage 表（used 列），LEFT JOIN 得到；
+// 无 usage 行时降级为 0，前端不展示。
 package collector
 
 import (
@@ -92,11 +95,15 @@ func CollectWorkBuddyDBSessions() []protocol.SessionInfo {
 		return nil
 	}
 
+	// LEFT JOIN session_usage：该表 used 列即当前上下文占用 token（size 为窗口上限，
+	// 如 168000）。无 usage 行的会话 used 为 NULL，COALESCE 兜底为 0（前端不展示）。
 	rows, err := db.Query(`
-		SELECT id, cwd, status, created_at,
-		       COALESCE(last_activity_at, updated_at)
-		FROM sessions
-		WHERE deleted_at IS NULL`)
+		SELECT s.id, s.cwd, s.status, s.created_at,
+		       COALESCE(s.last_activity_at, s.updated_at),
+		       COALESCE(u.used, 0)
+		FROM sessions s
+		LEFT JOIN session_usage u ON u.session_id = s.id
+		WHERE s.deleted_at IS NULL`)
 	if err != nil {
 		// 查询失败（如库瞬时不可读）：丢弃缓存句柄，下轮重开。
 		resetWorkBuddyDB()
@@ -111,8 +118,9 @@ func CollectWorkBuddyDBSessions() []protocol.SessionInfo {
 			id, cwd, status string
 			createdAt       int64
 			lastActivity    int64
+			contextTokens   int64
 		)
-		if err := rows.Scan(&id, &cwd, &status, &createdAt, &lastActivity); err != nil {
+		if err := rows.Scan(&id, &cwd, &status, &createdAt, &lastActivity, &contextTokens); err != nil {
 			continue
 		}
 		state, include := mapWorkBuddyState(status, nowMs-lastActivity)
@@ -129,6 +137,7 @@ func CollectWorkBuddyDBSessions() []protocol.SessionInfo {
 			LastHeartbeat: lastActivity,
 			State:         state,
 			LastActivity:  lastActivity,
+			ContextTokens: contextTokens,
 		})
 	}
 	if err := rows.Err(); err != nil {
