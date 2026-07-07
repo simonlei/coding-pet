@@ -47,7 +47,7 @@ func main() {
 	addr := net.JoinHostPort("0.0.0.0", *port)
 
 	store := server.NewStore()
-	handler := server.NewHandler(store, *token)
+	handler := server.NewHandler(store, *token, version)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)

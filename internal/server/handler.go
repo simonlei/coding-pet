@@ -10,13 +10,14 @@ import (
 
 // Handler 持有 Store 引用
 type Handler struct {
-	store *Store
-	token string // 认证 token，为空时跳过认证
+	store   *Store
+	token   string // 认证 token，为空时跳过认证
+	version string // Server 版本号（由 main 注入，用于前端展示）
 }
 
 // NewHandler 创建 Handler
-func NewHandler(store *Store, token string) *Handler {
-	return &Handler{store: store, token: token}
+func NewHandler(store *Store, token string, version string) *Handler {
+	return &Handler{store: store, token: token, version: version}
 }
 
 // RegisterRoutes 注册所有路由到 mux
@@ -81,6 +82,7 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dashboard := h.store.GetDashboard()
+	dashboard.ServerVersion = h.version
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(dashboard)
 }

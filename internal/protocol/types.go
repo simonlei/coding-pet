@@ -73,6 +73,7 @@ type DashboardResponse struct {
 	TotalSessions int             `json:"total_sessions"`
 	ActiveCount   int             `json:"active_count"`
 	WaitingCount  int             `json:"waiting_count"`
-	ApprovalCount int             `json:"approval_count"` // 仅 waiting_for_approval 的 session 数
-	OfflineCount  int             `json:"offline_count"`  // 掉线机器数
+	ApprovalCount int             `json:"approval_count"`            // 仅 waiting_for_approval 的 session 数
+	OfflineCount  int             `json:"offline_count"`             // 掉线机器数
+	ServerVersion string          `json:"server_version,omitempty"` // 由 ldflags 注入的 server 版本号
 }
