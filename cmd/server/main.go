@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -14,12 +15,20 @@ import (
 	"github.com/simonlei/coding-pet-dashboard/internal/server"
 )
 
-const version = "0.1.0"
+// version 由 CI 通过 -ldflags "-X main.version=..." 注入，必须是 var（const 会使 -X 静默失效）。
+// 默认值 "dev" 用于标识未经 CI 注入的本地构建。
+var version = "dev"
 
 func main() {
 	port := flag.String("port", "3000", "HTTP listen port")
 	token := flag.String("token", "", "Auth token for Agent reports (optional)")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	addr := net.JoinHostPort("0.0.0.0", *port)
 

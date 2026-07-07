@@ -14,7 +14,9 @@ import (
 	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
-const version = "0.1.0"
+// version 由 CI 通过 -ldflags "-X main.version=..." 注入，必须是 var（const 会使 -X 静默失效）。
+// 默认值 "dev" 用于标识未经 CI 注入的本地构建。
+var version = "dev"
 
 func main() {
 	// flag 解析（环境变量作为默认值）
@@ -23,7 +25,13 @@ func main() {
 	machineID := flag.String("id", envOr("DASHBOARD_ID", ""), "Unique machine ID (default: hostname)")
 	hostname := flag.String("hostname", "", "Display hostname (default: os.Hostname())")
 	interval := flag.Duration("interval", 1*time.Second, "Report interval")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	if *serverURL == "" {
 		log.Fatal("--server is required (or set DASHBOARD_SERVER)")
