@@ -1,15 +1,18 @@
 package selfupdate
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,6 +26,10 @@ const (
 	userAgent = "coding-pet-selfupdate"
 	// shaSumsAsset 是 release 中校验和清单的资产名。
 	shaSumsAsset = "SHA256SUMS.txt"
+	// archiveDownloadTimeout 是归档下载的总超时（覆盖握手+body）。
+	// 二进制包几 MB 到几十 MB，跨境网络慢时 30s 完全不够；给足 10 分钟。
+	// 小请求（release JSON、SHA256SUMS）仍走 Client.Timeout 的 30s 快失败。
+	archiveDownloadTimeout = 10 * time.Minute
 )
 
 // Asset 对应 release 的一个可下载资产。
@@ -41,13 +48,25 @@ type Release struct {
 type Client struct {
 	APIBase string
 	HTTP    *http.Client
+	// Token 为可选的 GitHub 个人访问令牌。设置后限流从 60/hr 提升到 5000/hr。
+	// 由 NewClient 从 GITHUB_TOKEN 环境变量读取；测试可显式覆盖或置空。
+	Token string
 }
 
 // NewClient 返回使用默认 GitHub 地址与合理超时的 Client。
+// 若环境变量 GITHUB_TOKEN 存在（非空），后续请求会带上 Authorization 头以规避匿名限流。
 func NewClient() *Client {
 	return &Client{
 		APIBase: defaultAPIBase,
 		HTTP:    &http.Client{Timeout: 30 * time.Second},
+		Token:   strings.TrimSpace(os.Getenv("GITHUB_TOKEN")),
+	}
+}
+
+// applyAuth 若配置了 Token 就给请求加上 Bearer 认证头。
+func (c *Client) applyAuth(req *http.Request) {
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 }
 
@@ -60,6 +79,7 @@ func (c *Client) FetchLatest() (*Release, error) {
 	}
 	req.Header.Set("User-Agent", userAgent) // 必填，否则 GitHub 返回 403
 	req.Header.Set("Accept", "application/vnd.github+json")
+	c.applyAuth(req)
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
@@ -68,7 +88,7 @@ func (c *Client) FetchLatest() (*Release, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch latest release: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("fetch latest release: %s", describeGitHubError(resp))
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -148,6 +168,7 @@ func (c *Client) fetchBytes(url string) ([]byte, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
+	c.applyAuth(req)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
@@ -157,6 +178,49 @@ func (c *Client) fetchBytes(url string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// describeGitHubError 把 GitHub 非 200 响应格式化成信息丰富的字符串：
+// 带上限流剩余/重置时间与响应体首行 message，便于运维定位（否则只看到 "HTTP 403"）。
+func describeGitHubError(resp *http.Response) string {
+	limit := resp.Header.Get("X-RateLimit-Limit")
+	remaining := resp.Header.Get("X-RateLimit-Remaining")
+	// 只读一小段 body，避免异常响应把日志撑爆。
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	var msg struct {
+		Message          string `json:"message"`
+		DocumentationURL string `json:"documentation_url"`
+	}
+	_ = json.Unmarshal(body, &msg)
+
+	parts := []string{fmt.Sprintf("HTTP %d", resp.StatusCode)}
+	if msg.Message != "" {
+		parts = append(parts, msg.Message)
+	}
+	// 限流耗尽时给出明确提示与重置时间。
+	if remaining == "0" && limit != "" {
+		if reset := resp.Header.Get("X-RateLimit-Reset"); reset != "" {
+			if ts, err := strconv.ParseInt(reset, 10, 64); err == nil {
+				parts = append(parts, fmt.Sprintf("rate limit exhausted (%s/hr, resets at %s)",
+					limit, time.Unix(ts, 0).Format(time.RFC3339)))
+			}
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+// humanBytes 把字节数格式化成人可读字符串（1.2MB / 500KB）。
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%dB", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // DownloadAndVerify 下载归档到 destDir 下的临时文件，并对照 SHA256SUMS.txt 校验。
@@ -187,6 +251,12 @@ func (c *Client) DownloadAndVerify(archive, shaSums Asset, destDir string) (stri
 		return "", err
 	}
 	req.Header.Set("User-Agent", userAgent)
+	c.applyAuth(req)
+	// 归档下载超时独立控制：Client.Timeout(30s) 对小请求友好，但覆盖 body 读取后
+	// 大文件跨境慢速下载必然失败。这里用 per-request context 覆盖之。
+	ctx, cancel := context.WithTimeout(context.Background(), archiveDownloadTimeout)
+	defer cancel()
+	req = req.WithContext(ctx)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		tmp.Close()
@@ -197,16 +267,23 @@ func (c *Client) DownloadAndVerify(archive, shaSums Asset, destDir string) (stri
 	if resp.StatusCode != http.StatusOK {
 		tmp.Close()
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("download archive: HTTP %d", resp.StatusCode)
+		return "", fmt.Errorf("download archive: %s", describeGitHubError(resp))
+	}
+	if resp.ContentLength > 0 {
+		log.Printf("selfupdate: downloading %s (%s)", archive.Name, humanBytes(resp.ContentLength))
+	} else {
+		log.Printf("selfupdate: downloading %s (size unknown)", archive.Name)
 	}
 
 	// 边写边算 SHA256。
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(tmp, h), resp.Body); err != nil {
+	n, err := io.Copy(io.MultiWriter(tmp, h), resp.Body)
+	if err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("write archive: %w", err)
 	}
+	log.Printf("selfupdate: downloaded %s (%s), verifying sha256", archive.Name, humanBytes(n))
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("close archive: %w", err)

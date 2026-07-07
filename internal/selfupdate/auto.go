@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"log"
 	"math/rand"
+	"os"
 	"time"
 )
 
@@ -20,21 +21,28 @@ func StartAuto(opts Options, interval time.Duration) func() {
 	if interval <= 0 {
 		interval = DefaultInterval
 	}
+	// 首次触发前也加一次抖动，避免所有实例启动即打 API
+	delay := jitter(interval)
+	auth := "anonymous (60/hr limit)"
+	if os.Getenv("GITHUB_TOKEN") != "" {
+		auth = "GITHUB_TOKEN present (5000/hr limit)"
+	}
+	log.Printf("selfupdate: auto-update enabled (kind=%s, current=%s, interval=%s, auth=%s), first check in %s",
+		opts.Kind, opts.CurrentVersion, interval, auth, delay)
 	stop := make(chan struct{})
 	go func() {
-		// 首次触发前也加一次抖动，避免所有实例启动即打 API
-		delay := jitter(interval)
-		log.Printf("selfupdate: auto-update enabled, first check in %s (kind=%s, interval=%s)", delay, opts.Kind, interval)
 		select {
 		case <-time.After(delay):
 		case <-stop:
 			return
 		}
 		for {
+			log.Printf("selfupdate: periodic check starting (kind=%s, local=%s)", opts.Kind, opts.CurrentVersion)
 			if _, err := CheckAndUpdate(opts); err != nil {
 				log.Printf("selfupdate: check failed (will retry next interval): %v", err)
 			}
 			next := jitter(interval)
+			log.Printf("selfupdate: next check in %s", next)
 			select {
 			case <-time.After(next):
 			case <-stop:

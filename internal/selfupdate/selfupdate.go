@@ -47,11 +47,13 @@ func CheckAndUpdate(opts Options) (bool, error) {
 		client = NewClient()
 	}
 
+	log.Printf("selfupdate: checking latest release from GitHub (kind=%s, local=%s)", opts.Kind, opts.CurrentVersion)
 	rel, err := client.FetchLatest()
 	if err != nil {
 		log.Printf("selfupdate: check failed: %v", err)
 		return false, err
 	}
+	log.Printf("selfupdate: latest release fetched: tag=%s (assets=%d)", rel.TagName, len(rel.Assets))
 
 	newer, err := IsNewer(rel.TagName, opts.CurrentVersion)
 	if err != nil {
@@ -83,20 +85,25 @@ func CheckAndUpdate(opts Options) (bool, error) {
 		log.Printf("selfupdate: asset selection failed: %v", err)
 		return false, err
 	}
+	log.Printf("selfupdate: selected asset %s, downloading to %s", archive.Name, destDir)
 
 	archivePath, err := client.DownloadAndVerify(archive, shaSums, destDir)
 	if err != nil {
 		log.Printf("selfupdate: download/verify failed: %v", err)
 		return false, err
 	}
+	log.Printf("selfupdate: download & sha256 verified: %s", archivePath)
 	defer os.Remove(archivePath) // 解压后清理归档
 
+	log.Printf("selfupdate: extracting %s from archive", binaryName(opts.Kind))
 	newBin, err := ExtractBinary(archivePath, binaryName(opts.Kind), destDir)
 	if err != nil {
 		log.Printf("selfupdate: extract failed: %v", err)
 		return false, err
 	}
+	log.Printf("selfupdate: extracted new binary to %s", newBin)
 
+	log.Printf("selfupdate: replacing binary at %s", exePath)
 	if err := Replace(newBin, exePath); err != nil {
 		os.Remove(newBin)
 		log.Printf("selfupdate: replace failed (old process kept running): %v", err)
