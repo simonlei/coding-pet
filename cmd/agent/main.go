@@ -12,9 +12,12 @@ import (
 
 	"github.com/simonlei/coding-pet-dashboard/internal/collector"
 	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
+	"github.com/simonlei/coding-pet-dashboard/internal/selfupdate"
 )
 
-const version = "0.1.0"
+// version 由 CI 通过 -ldflags "-X main.version=..." 注入，必须是 var（const 会使 -X 静默失效）。
+// 默认值 "dev" 用于标识未经 CI 注入的本地构建。
+var version = "dev"
 
 func main() {
 	// flag 解析（环境变量作为默认值）
@@ -23,7 +26,25 @@ func main() {
 	machineID := flag.String("id", envOr("DASHBOARD_ID", ""), "Unique machine ID (default: hostname)")
 	hostname := flag.String("hostname", "", "Display hostname (default: os.Hostname())")
 	interval := flag.Duration("interval", 1*time.Second, "Report interval")
+	showVersion := flag.Bool("version", false, "Print version and exit")
+	selfUpdate := flag.Bool("self-update", false, "Check GitHub for a newer release and update if available, then exit")
+	autoUpdate := flag.Bool("auto-update", envAutoUpdate(), "Enable periodic auto-update (env: CODING_PET_AUTO_UPDATE=false to disable)")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
+
+	// Windows: 清理上次升级留下的 .old 文件（Unix 下 no-op）
+	if exePath, err := os.Executable(); err == nil {
+		selfupdate.CleanupOld(exePath)
+	}
+
+	if *selfUpdate {
+		runSelfUpdateOnce("agent", nil)
+		return
+	}
 
 	if *serverURL == "" {
 		log.Fatal("--server is required (or set DASHBOARD_SERVER)")
@@ -42,8 +63,18 @@ func main() {
 		actualMachineID = actualHostname
 	}
 
-	log.Printf("Starting coding-pet-agent v%s, machine_id=%s, server=%s, interval=%s",
+	log.Printf("Starting coding-pet-agent %s, machine_id=%s, server=%s, interval=%s",
 		version, actualMachineID, *serverURL, *interval)
+
+	// 自动更新（默认开启，agent 无端口，BeforeRestart=nil）
+	if *autoUpdate {
+		selfupdate.StartAuto(selfupdate.Options{
+			Kind:           "agent",
+			CurrentVersion: version,
+		}, selfupdate.DefaultInterval)
+	} else {
+		log.Printf("selfupdate: auto-update disabled by flag/env")
+	}
 
 	c := collector.New()
 
@@ -118,4 +149,33 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envAutoUpdate 读取 CODING_PET_AUTO_UPDATE 决定 --auto-update flag 的默认值。
+// 显式设置 "false"/"0" 关闭；未设置或其他值默认开启。
+func envAutoUpdate() bool {
+	v := os.Getenv("CODING_PET_AUTO_UPDATE")
+	if v == "false" || v == "0" {
+		return false
+	}
+	return true
+}
+
+// runSelfUpdateOnce 手动触发一次检查更新；成功升级则 os.Exit（不返回），
+// 无新版或失败时打印结果并 return。
+func runSelfUpdateOnce(kind string, beforeRestart func() error) {
+	log.Printf("selfupdate: manual check triggered (kind=%s, local=%s)", kind, version)
+	updated, err := selfupdate.CheckAndUpdate(selfupdate.Options{
+		Kind:           kind,
+		CurrentVersion: version,
+		BeforeRestart:  beforeRestart,
+	})
+	if err != nil {
+		log.Printf("selfupdate: manual check failed: %v", err)
+		os.Exit(1)
+	}
+	if !updated {
+		log.Printf("selfupdate: no update needed")
+	}
+	// updated=true 时进程已被 os.Exit(0) 终止，不会走到这
 }
