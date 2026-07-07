@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="64dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:background="?attr/colorPrimary"
+        app:contentInsetStartWithNavigation="0dp"
+        app:titleTextColor="?attr/colorOnPrimary"
+        app:titleTextAppearance="@style/ToolbarTitle"
+        app:navigationIconTint="?attr/colorOnPrimary"
+        app:title="@string/settings_title"/>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:id="@+id/rowUrl"
+                style="@style/SettingRow">
+                <TextView style="@style/SettingLabel" android:text="@string/settings_url"/>
+                <TextView android:id="@+id/txtUrl" style="@style/SettingValue"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="12dp"
+                android:gravity="center_vertical">
+                <TextView style="@style/SettingLabel" android:text="@string/settings_dim_enabled"/>
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchDim"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <LinearLayout
+                android:id="@+id/rowStart"
+                style="@style/SettingRow">
+                <TextView style="@style/SettingLabel" android:text="@string/settings_start"/>
+                <TextView android:id="@+id/txtStart" style="@style/SettingValue"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <LinearLayout
+                android:id="@+id/rowEnd"
+                style="@style/SettingRow">
+                <TextView style="@style/SettingLabel" android:text="@string/settings_end"/>
+                <TextView android:id="@+id/txtEnd" style="@style/SettingValue"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <LinearLayout
+                android:id="@+id/rowBrightness"
+                style="@style/SettingRow">
+                <TextView style="@style/SettingLabel" android:text="@string/settings_brightness"/>
+                <TextView android:id="@+id/txtBrightness" style="@style/SettingValue"/>
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:textSize="12sp"
+                android:textColor="#888"
+                android:text="@string/settings_hint"/>
+
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>
