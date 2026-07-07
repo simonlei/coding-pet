@@ -10,12 +10,16 @@ object Prefs {
     const val KEY_DIM_END = "dim_end"
     const val KEY_DIM_ENABLED = "dim_enabled"
     const val KEY_DIM_BRIGHTNESS = "dim_brightness" // 0..100 (百分比,0=全黑)
+    const val KEY_LOW_BRIGHTNESS = "low_brightness" // 0..100 平时衰减到的最低亮度
+    const val KEY_FADE_SECONDS = "fade_seconds"     // 触摸后到达最低亮度的时长(秒)
 
     // 默认: 18:00 -> 09:00
     const val DEFAULT_URL = "http://10.0.2.2:3000/"
     const val DEFAULT_START = 18 * 60
     const val DEFAULT_END = 9 * 60
     const val DEFAULT_BRIGHTNESS = 0
+    const val DEFAULT_LOW_BRIGHTNESS = 5
+    const val DEFAULT_FADE_SECONDS = 60
 
     fun get(ctx: Context) = PreferenceManager.getDefaultSharedPreferences(ctx)
 
@@ -26,6 +30,8 @@ object Prefs {
     fun dimEnd(ctx: Context) = get(ctx).getInt(KEY_DIM_END, DEFAULT_END)
     fun dimEnabled(ctx: Context) = get(ctx).getBoolean(KEY_DIM_ENABLED, true)
     fun dimBrightness(ctx: Context) = get(ctx).getInt(KEY_DIM_BRIGHTNESS, DEFAULT_BRIGHTNESS)
+    fun lowBrightness(ctx: Context) = get(ctx).getInt(KEY_LOW_BRIGHTNESS, DEFAULT_LOW_BRIGHTNESS)
+    fun fadeSeconds(ctx: Context) = get(ctx).getInt(KEY_FADE_SECONDS, DEFAULT_FADE_SECONDS)
 
     /**
      * 判断当前时间是否处于"黑屏时段"。

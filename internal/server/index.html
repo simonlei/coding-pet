@@ -657,6 +657,15 @@
         // Render machine list
         renderMachineList(onlineMachines, offlineMachines);
 
+        // 通知 Android 宿主：当前需要处理的会话总数 (审批 + 等待输入)。
+        // 桌面浏览器下 window.CodingPetHost 不存在，try/catch 保底。
+        try {
+          if (window.CodingPetHost && typeof window.CodingPetHost.setAlert === 'function') {
+            var pending = approvalSessions.length + waitingSessions.length;
+            window.CodingPetHost.setAlert(pending);
+          }
+        } catch (e) { /* ignore */ }
+
         // Hide loading
         var loadingEl = document.getElementById('loadingIndicator');
         if (loadingEl) {

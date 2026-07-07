@@ -8,6 +8,10 @@
     <string name="settings_end">黑屏结束时间</string>
     <string name="settings_brightness">黑屏亮度</string>
     <string name="settings_brightness_hint">0~100（0 = 完全黑，仍保持应用活跃）</string>
-    <string name="settings_hint">应用会在黑屏时段显示黑色遮罩并降低亮度，但仍然保持活跃、不会被系统锁屏。默认时段为 18:00 - 09:00。触摸屏幕可临时点亮 10 秒。</string>
+    <string name="settings_low_brightness">平时最低亮度</string>
+    <string name="settings_low_brightness_hint">0~100，平时从全亮缓慢降到这个值以防 OLED 烧屏</string>
+    <string name="settings_fade">变暗时长（秒）</string>
+    <string name="settings_fade_hint">触摸屏幕后经过多少秒降到最低亮度（5~3600）</string>
+    <string name="settings_hint">应用会在黑屏时段显示黑色遮罩并降低亮度；在其他时段，从上次触摸起亮度会缓慢降到「最低亮度」以防 OLED 烧屏。dashboard 有等待审批/输入的会话时会立即恢复全亮。</string>
     <string name="reload">刷新</string>
 </resources>
