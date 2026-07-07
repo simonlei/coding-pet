@@ -1,0 +1,151 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build Debug & Release APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Prepare variables
+        id: vars
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REF}" != refs/tags/* ]]; then
+            VERSION="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Gradle wrapper (if missing)
+        shell: bash
+        run: |
+          if [ ! -f gradlew ]; then
+            gradle wrapper --gradle-version 8.7
+          fi
+
+      - name: Decode signing keystore
+        id: sign
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "keystore=$RUNNER_TEMP/release.keystore" >> "$GITHUB_OUTPUT"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build Debug APK
+        shell: bash
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Build Release APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.sign.outputs.keystore }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Rename APKs
+        id: rename
+        shell: bash
+        run: |
+          VER="${{ steps.vars.outputs.version }}"
+          mkdir -p out
+          DEBUG_SRC="app/build/outputs/apk/debug/app-debug.apk"
+          if [ -f "$DEBUG_SRC" ]; then
+            cp "$DEBUG_SRC" "out/coding-pet-viewer-${VER}-debug.apk"
+          fi
+          # release 未签名时产物名为 app-release-unsigned.apk
+          REL_SIGNED="app/build/outputs/apk/release/app-release.apk"
+          REL_UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ -f "$REL_SIGNED" ]; then
+            cp "$REL_SIGNED" "out/coding-pet-viewer-${VER}-release.apk"
+          elif [ -f "$REL_UNSIGNED" ]; then
+            cp "$REL_UNSIGNED" "out/coding-pet-viewer-${VER}-release-unsigned.apk"
+          fi
+          ls -la out
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-debug
+          path: android/out/*-debug.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-release
+          path: android/out/*-release*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+  release:
+    name: Attach APK to Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-apk
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: android-apk-*
+          merge-multiple: true
+
+      - name: List
+        run: ls -la dist
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum *.apk > SHA256SUMS-android.txt 2>/dev/null || true
+          cat SHA256SUMS-android.txt || true
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.apk
+            dist/SHA256SUMS-android.txt
+          generate_release_notes: true

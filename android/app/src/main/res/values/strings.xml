@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CodingPet Viewer</string>
+    <string name="settings_title">设置</string>
+    <string name="settings_url">Agent Server 地址</string>
+    <string name="settings_dim_enabled">启用黑屏时段</string>
+    <string name="settings_start">黑屏开始时间</string>
+    <string name="settings_end">黑屏结束时间</string>
+    <string name="settings_brightness">黑屏亮度</string>
+    <string name="settings_brightness_hint">0~100（0 = 完全黑，仍保持应用活跃）</string>
+    <string name="settings_hint">应用会在黑屏时段显示黑色遮罩并降低亮度，但仍然保持活跃、不会被系统锁屏。默认时段为 18:00 - 09:00。触摸屏幕可临时点亮 10 秒。</string>
+    <string name="reload">刷新</string>
+</resources>
