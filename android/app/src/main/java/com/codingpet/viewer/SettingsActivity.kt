@@ -39,6 +39,8 @@ class SettingsActivity : AppCompatActivity() {
             Prefs.get(this).edit { putBoolean(Prefs.KEY_DIM_ENABLED, checked) }
         }
         binding.rowBrightness.setOnClickListener { editBrightness() }
+        binding.rowLowBrightness.setOnClickListener { editLowBrightness() }
+        binding.rowFade.setOnClickListener { editFadeSeconds() }
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -51,6 +53,8 @@ class SettingsActivity : AppCompatActivity() {
         binding.txtEnd.text = Prefs.formatMinutes(Prefs.dimEnd(this))
         binding.switchDim.isChecked = Prefs.dimEnabled(this)
         binding.txtBrightness.text = "${Prefs.dimBrightness(this)}%"
+        binding.txtLowBrightness.text = "${Prefs.lowBrightness(this)}%"
+        binding.txtFade.text = "${Prefs.fadeSeconds(this)}s"
     }
 
     private fun editUrl() {
@@ -95,6 +99,46 @@ class SettingsActivity : AppCompatActivity() {
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 val v = edit.text.toString().toIntOrNull()?.coerceIn(0, 100) ?: 0
                 Prefs.get(this).edit { putInt(Prefs.KEY_DIM_BRIGHTNESS, v) }
+                refresh()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun editLowBrightness() {
+        val edit = EditText(this).apply {
+            setText(Prefs.lowBrightness(this@SettingsActivity).toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setSingleLine()
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.settings_low_brightness))
+            .setMessage(getString(R.string.settings_low_brightness_hint))
+            .setView(edit)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val v = edit.text.toString().toIntOrNull()?.coerceIn(0, 100)
+                    ?: Prefs.DEFAULT_LOW_BRIGHTNESS
+                Prefs.get(this).edit { putInt(Prefs.KEY_LOW_BRIGHTNESS, v) }
+                refresh()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun editFadeSeconds() {
+        val edit = EditText(this).apply {
+            setText(Prefs.fadeSeconds(this@SettingsActivity).toString())
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setSingleLine()
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.settings_fade))
+            .setMessage(getString(R.string.settings_fade_hint))
+            .setView(edit)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val v = edit.text.toString().toIntOrNull()?.coerceIn(5, 3600)
+                    ?: Prefs.DEFAULT_FADE_SECONDS
+                Prefs.get(this).edit { putInt(Prefs.KEY_FADE_SECONDS, v) }
                 refresh()
             }
             .setNegativeButton(android.R.string.cancel, null)

@@ -5,8 +5,11 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -19,13 +22,32 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val handler = Handler(Looper.getMainLooper())
+
+    // 上一次用户交互时间，用作平时缓慢变暗的起算点。
+    private var lastInteractionMs: Long = SystemClock.uptimeMillis()
+
+    // dashboard 上报的待处理提醒数量（审批 + 等待输入）。>0 时强制回到全亮。
+    @Volatile
+    private var alertCount: Int = 0
+
+    // 用于兜底扫 DOM 的节流：JS 桥有心跳时不必再扫。
+    private var lastBridgeSignalMs: Long = 0L
+
     private val tickRunnable = object : Runnable {
         override fun run() {
-            applyDimState()
-            // 下次刚好切换时唤起 + 兜底每分钟检查一次
-            val next = Prefs.millisUntilNextToggle(this@MainActivity)
-                .coerceAtMost(60_000L)
-                .coerceAtLeast(1_000L)
+            applyBrightnessState()
+            scanDashboardAlertsIfBridgeStale()
+            // 变暗过程中需要平滑刷新，非黑屏时段以 2 秒为周期；
+            // 夜间黑屏时段本身是静态的，用较大的兜底间隔即可。
+            val fadeMs = fadeMs()
+            val next = if (Prefs.isInDimWindow(this@MainActivity)) {
+                Prefs.millisUntilNextToggle(this@MainActivity)
+                    .coerceAtMost(60_000L)
+                    .coerceAtLeast(1_000L)
+            } else {
+                // 分成 ~30 步走完衰减，够顺滑又不太费电
+                (fadeMs / 30L).coerceAtLeast(1_000L).coerceAtMost(5_000L)
+            }
             handler.postDelayed(this, next)
         }
     }
@@ -47,11 +69,25 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnReload.setOnClickListener { loadUrl() }
         binding.dimOverlay.setOnClickListener {
-            // 触摸黑屏区域时,临时点亮几秒
-            temporaryWake()
+            // 触摸黑屏遮罩：点亮，重置衰减
+            noteUserInteraction()
         }
     }
 
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.action == MotionEvent.ACTION_DOWN) {
+            noteUserInteraction()
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun noteUserInteraction() {
+        lastInteractionMs = SystemClock.uptimeMillis()
+        binding.dimOverlay.visibility = View.GONE
+        applyBrightnessState()
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
         val ws: WebSettings = binding.webView.settings
         ws.javaScriptEnabled = true
@@ -71,6 +107,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.webView.webChromeClient = WebChromeClient()
+        binding.webView.addJavascriptInterface(HostBridge(), "CodingPetHost")
     }
 
     private fun loadUrl() {
@@ -78,27 +115,88 @@ class MainActivity : AppCompatActivity() {
         binding.webView.loadUrl(url)
     }
 
-    private fun applyDimState() {
-        val dim = Prefs.isInDimWindow(this)
-        binding.dimOverlay.visibility = if (dim) View.VISIBLE else View.GONE
-        // 同时降低系统亮度,进一步"看起来像黑屏"
-        val lp = window.attributes
-        lp.screenBrightness = if (dim) {
-            (Prefs.dimBrightness(this).coerceIn(0, 100) / 100f).coerceAtLeast(0.001f)
-        } else {
-            WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+    /**
+     * 计算当前应显示的亮度并应用。三种态优先级：
+     *   1. 有 pending 提醒 —— 全亮 + 移除遮罩
+     *   2. 处于黑屏时段    —— 遮罩 + dim_brightness
+     *   3. 其他            —— 从 1.0 线性衰减到 low_brightness
+     */
+    private fun applyBrightnessState() {
+        val hasAlert = alertCount > 0
+        val inDimWindow = Prefs.isInDimWindow(this)
+
+        val target: Float
+        when {
+            hasAlert -> {
+                binding.dimOverlay.visibility = View.GONE
+                target = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            }
+            inDimWindow -> {
+                binding.dimOverlay.visibility = View.VISIBLE
+                target = (Prefs.dimBrightness(this).coerceIn(0, 100) / 100f)
+                    .coerceAtLeast(0.001f)
+            }
+            else -> {
+                binding.dimOverlay.visibility = View.GONE
+                val elapsed = SystemClock.uptimeMillis() - lastInteractionMs
+                val ratio = (elapsed.toFloat() / fadeMs().toFloat()).coerceIn(0f, 1f)
+                val low = (Prefs.lowBrightness(this).coerceIn(0, 100) / 100f)
+                    .coerceAtLeast(0.001f)
+                // 1.0 -> low, 线性
+                target = 1f - (1f - low) * ratio
+            }
         }
-        window.attributes = lp
+
+        val lp = window.attributes
+        if (target != lp.screenBrightness) {
+            lp.screenBrightness = target
+            window.attributes = lp
+        }
     }
 
-    private fun temporaryWake() {
-        // 临时移除遮罩 10 秒,允许用户交互
-        binding.dimOverlay.visibility = View.GONE
-        val lp = window.attributes
-        lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-        window.attributes = lp
-        handler.removeCallbacks(tickRunnable)
-        handler.postDelayed(tickRunnable, 10_000L)
+    private fun fadeMs(): Long {
+        val sec = Prefs.fadeSeconds(this).coerceIn(5, 3600)
+        return sec * 1000L
+    }
+
+    /**
+     * dashboard 端每秒 render 一次会调用 CodingPetHost.setAlert()。
+     * 如果超过 5 秒没收到 JS 心跳（页面挂了、还没加载完、老版本 dashboard），
+     * 走兜底：evaluateJavascript 直接扫顶栏两个数字。
+     */
+    private fun scanDashboardAlertsIfBridgeStale() {
+        val stale = SystemClock.uptimeMillis() - lastBridgeSignalMs > 5_000L
+        if (!stale) return
+        binding.webView.evaluateJavascript(
+            "(function(){\n" +
+                "  var a=document.getElementById('statApproval');\n" +
+                "  var w=document.getElementById('statWaiting');\n" +
+                "  var an=a?parseInt(a.textContent,10)||0:0;\n" +
+                "  var wn=w?parseInt(w.textContent,10)||0:0;\n" +
+                "  return an+wn;\n" +
+                "})();"
+        ) { value ->
+            val n = value?.trim('"')?.toIntOrNull() ?: 0
+            if (n != alertCount) {
+                alertCount = n
+                applyBrightnessState()
+            }
+        }
+    }
+
+    inner class HostBridge {
+        @JavascriptInterface
+        fun setAlert(count: Int) {
+            lastBridgeSignalMs = SystemClock.uptimeMillis()
+            if (count == alertCount) return
+            val hadAlert = alertCount > 0
+            alertCount = count
+            // 从有提醒 -> 无提醒：重置衰减计时，重新从全亮开始变暗
+            if (hadAlert && count == 0) {
+                lastInteractionMs = SystemClock.uptimeMillis()
+            }
+            handler.post { applyBrightnessState() }
+        }
     }
 
     override fun onResume() {

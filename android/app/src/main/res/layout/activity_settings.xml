@@ -78,6 +78,24 @@
                 <TextView android:id="@+id/txtBrightness" style="@style/SettingValue"/>
             </LinearLayout>
 
+            <View style="@style/Divider"/>
+
+            <LinearLayout
+                android:id="@+id/rowLowBrightness"
+                style="@style/SettingRow">
+                <TextView style="@style/SettingLabel" android:text="@string/settings_low_brightness"/>
+                <TextView android:id="@+id/txtLowBrightness" style="@style/SettingValue"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <LinearLayout
+                android:id="@+id/rowFade"
+                style="@style/SettingRow">
+                <TextView style="@style/SettingLabel" android:text="@string/settings_fade"/>
+                <TextView android:id="@+id/txtFade" style="@style/SettingValue"/>
+            </LinearLayout>
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
