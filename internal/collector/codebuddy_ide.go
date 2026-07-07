@@ -26,6 +26,9 @@
 //
 // 前端 HOOK_ONLY_TOOLS = { codebuddy_ide, workbuddy } 已有 3 分钟降级逻辑，采集端只要
 // 打上 Tool=codebuddy_ide 并给对 state / last_activity，即自动复用「黄闪 3min → 淡黄半小时」展示。
+//
+// 当前上下文占用 token 取自会话 index.json 里最后一个带 usage 的 request 的
+// usage.lastTokens（随轮次单调增长的窗口占用）；无 usage 时降级为 0，前端不展示。
 package collector
 
 import (
@@ -61,6 +64,12 @@ type cbIDEConversationIndex struct {
 	} `json:"messages"`
 	Requests []struct {
 		State string `json:"state"` // running / complete
+		// usage.lastTokens 是该轮结束时的上下文窗口占用（随轮次单调增长），
+		// 即「当前上下文占用」的语义；inputTokens 是该轮所有子调用的累计输入
+		// （可达百万），不适合作占用展示。running 中的轮次 usage 缺失（为 nil）。
+		Usage *struct {
+			LastTokens int64 `json:"lastTokens"`
+		} `json:"usage"`
 	} `json:"requests"`
 }
 
@@ -209,7 +218,20 @@ func collectCodeBuddyIDEWorkspace(wsDir string, nowMs int64) (protocol.SessionIn
 		LastHeartbeat: lastActivity,
 		State:         state,
 		LastActivity:  lastActivity,
+		ContextTokens: codebuddyIDEContextTokens(convIdx),
 	}, true
+}
+
+// codebuddyIDEContextTokens 返回当前上下文占用 token：从后向前找第一个带 usage 的
+// request，取其 usage.lastTokens。最后一轮可能是 running（usage 为 nil），故需回溯。
+// 无任何 usage 时返回 0（优雅降级，前端不展示）。
+func codebuddyIDEContextTokens(convIdx cbIDEConversationIndex) int64 {
+	for i := len(convIdx.Requests) - 1; i >= 0; i-- {
+		if u := convIdx.Requests[i].Usage; u != nil && u.LastTokens > 0 {
+			return u.LastTokens
+		}
+	}
+	return 0
 }
 
 // mapCodeBuddyIDEState 把「最后 request 的 state + 距最后写盘的毫秒数」映射为 SessionState。
