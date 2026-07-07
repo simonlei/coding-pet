@@ -188,6 +188,59 @@ func TestCollectClaudeCode_MalformedSkipped(t *testing.T) {
 	}
 }
 
+// TestCollectClaudeCode_ContextTokens 验证：pid 文件对应的 JSONL 存在时，
+// 解析出 message.usage 填充 ContextTokens；JSONL 缺失时降级为 0。
+func TestCollectClaudeCode_ContextTokens(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	now := time.Now().UnixMilli()
+	pid := os.Getpid()
+
+	content := `{"pid":` + itoa(pid) + `,"sessionId":"sess-tok","cwd":"/tmp/proj","startedAt":` +
+		i64toa(now-10_000) + `,"kind":"interactive","status":"busy","updatedAt":` +
+		i64toa(now) + `,"statusUpdatedAt":` + i64toa(now) + `}`
+	writeClaudePID(t, dir, "tok.json", content)
+
+	// 写对应 JSONL：<configDir>/projects/<proj>/sess-tok.jsonl
+	projDir := filepath.Join(dir, "projects", "-tmp-proj")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jsonl := `{"type":"assistant","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":90,"cache_creation_input_tokens":0}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projDir, "sess-tok.jsonl"), []byte(jsonl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions := CollectClaudeCodeSessions()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].ContextTokens != 100 {
+		t.Errorf("expected ContextTokens=100, got %d", sessions[0].ContextTokens)
+	}
+}
+
+// TestCollectClaudeCode_NoJSONL_TokensZero 验证：无对应 JSONL 时 ContextTokens 降级为 0，不报错。
+func TestCollectClaudeCode_NoJSONL_TokensZero(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	now := time.Now().UnixMilli()
+	pid := os.Getpid()
+
+	content := `{"pid":` + itoa(pid) + `,"sessionId":"sess-notok","cwd":"/tmp/proj","startedAt":` +
+		i64toa(now-10_000) + `,"kind":"interactive","status":"busy","updatedAt":` +
+		i64toa(now) + `,"statusUpdatedAt":` + i64toa(now) + `}`
+	writeClaudePID(t, dir, "notok.json", content)
+
+	sessions := CollectClaudeCodeSessions()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].ContextTokens != 0 {
+		t.Errorf("expected ContextTokens=0 (no jsonl), got %d", sessions[0].ContextTokens)
+	}
+}
+
 func TestCollectClaudeCode_NoDir(t *testing.T) {
 	dir := t.TempDir() // 无 sessions 子目录
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)

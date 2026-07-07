@@ -82,11 +82,14 @@ func (c *Collector) collectOne(home buddyHome, pf PIDFile) (protocol.SessionInfo
 	}
 
 	// LastActivity 取 JSONL 文件的最后修改时间（不是 PID 文件的 mtime）
+	// 同时解析当前上下文占用 token（复用同一 JSONL 路径）
 	var lastActivity int64
+	var contextTokens int64
 	if jsonlPath, found := findSessionJSONLIn(home.dir, pf.SessionID); found {
 		if ji, err := os.Stat(jsonlPath); err == nil {
 			lastActivity = ji.ModTime().UnixMilli()
 		}
+		contextTokens = ContextTokensFromJSONL(jsonlPath)
 	}
 
 	return protocol.SessionInfo{
@@ -100,5 +103,6 @@ func (c *Collector) collectOne(home buddyHome, pf PIDFile) (protocol.SessionInfo
 		State:         state,
 		LastActivity:  lastActivity,
 		Version:       pf.Version,
+		ContextTokens: contextTokens,
 	}, nil
 }

@@ -75,3 +75,66 @@ func TestDetermineState_ExitPlanMode_IsInput(t *testing.T) {
 		t.Errorf("ExitPlanMode: expected %q, got %q", protocol.StateWaitingForInput, got)
 	}
 }
+
+// TestContextTokens_ClaudeFormat 验证：Claude Code 格式的 message.usage
+// 当前上下文占用 = input_tokens + cache_read_input_tokens + cache_creation_input_tokens。
+func TestContextTokens_ClaudeFormat(t *testing.T) {
+	lines := `{"type":"user","message":{"role":"user"}}
+{"type":"assistant","message":{"role":"assistant","usage":{"input_tokens":2,"cache_creation_input_tokens":269,"cache_read_input_tokens":198182,"output_tokens":917}}}
+`
+	path := writeJSONLFixture(t, lines)
+	got := ContextTokensFromJSONL(path)
+	want := int64(2 + 269 + 198182)
+	if got != want {
+		t.Errorf("claude usage: expected %d, got %d", want, got)
+	}
+}
+
+// TestContextTokens_CodeBuddyFormat 验证：CodeBuddy CLI 格式的 message.usage
+// 无 cache 字段，input_tokens 本身即上下文占用。
+func TestContextTokens_CodeBuddyFormat(t *testing.T) {
+	lines := `{"type":"function_call","message":{"usage":{"input_tokens":105393,"output_tokens":2162,"total_tokens":107555}}}
+`
+	path := writeJSONLFixture(t, lines)
+	got := ContextTokensFromJSONL(path)
+	want := int64(105393)
+	if got != want {
+		t.Errorf("codebuddy usage: expected %d, got %d", want, got)
+	}
+}
+
+// TestContextTokens_ScansBackwardForLastUsage 验证：反向扫描，取最后一条含 usage
+// 的记录（末尾若干条不含 usage 应被跳过）。
+func TestContextTokens_ScansBackwardForLastUsage(t *testing.T) {
+	lines := `{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":50}}}
+{"type":"assistant","message":{"usage":{"input_tokens":300,"cache_read_input_tokens":200}}}
+{"type":"function_call","name":"Bash","arguments":"{}"}
+{"type":"reasoning"}
+`
+	path := writeJSONLFixture(t, lines)
+	got := ContextTokensFromJSONL(path)
+	want := int64(300 + 200)
+	if got != want {
+		t.Errorf("scan backward: expected %d, got %d", want, got)
+	}
+}
+
+// TestContextTokens_NoUsage_ReturnsZero 验证：整个文件无 usage 时优雅降级返回 0。
+func TestContextTokens_NoUsage_ReturnsZero(t *testing.T) {
+	lines := `{"type":"message","role":"user"}
+{"type":"function_call","name":"Bash","arguments":"{}"}
+`
+	path := writeJSONLFixture(t, lines)
+	got := ContextTokensFromJSONL(path)
+	if got != 0 {
+		t.Errorf("no usage: expected 0, got %d", got)
+	}
+}
+
+// TestContextTokens_MissingFile_ReturnsZero 验证：文件不存在时返回 0，不 panic。
+func TestContextTokens_MissingFile_ReturnsZero(t *testing.T) {
+	got := ContextTokensFromJSONL("/nonexistent/path/session.jsonl")
+	if got != 0 {
+		t.Errorf("missing file: expected 0, got %d", got)
+	}
+}

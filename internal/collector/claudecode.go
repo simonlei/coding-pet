@@ -106,6 +106,20 @@ func mapClaudeStatus(status, waitingFor string) protocol.SessionState {
 	}
 }
 
+// findClaudeSessionTokens 在所有 Claude Code 配置目录下查找 <dir>/projects/<*>/<sessionID>.jsonl，
+// 解析当前上下文占用 token。找不到或无 usage 时返回 0（优雅降级）。
+func findClaudeSessionTokens(sessionID string) int64 {
+	for _, dir := range claudeConfigDirs() {
+		if dir == "" {
+			continue
+		}
+		if path, found := findSessionJSONLIn(dir, sessionID); found {
+			return ContextTokensFromJSONL(path)
+		}
+	}
+	return 0
+}
+
 // CollectClaudeCodeSessions 扫描所有 Claude Code pid 文件，返回 session 状态列表
 func CollectClaudeCodeSessions() []protocol.SessionInfo {
 	pidFiles := readClaudeCodePIDFiles()
@@ -141,6 +155,7 @@ func CollectClaudeCodeSessions() []protocol.SessionInfo {
 			State:         state,
 			LastActivity:  lastActivity,
 			Version:       pf.Version,
+			ContextTokens: findClaudeSessionTokens(pf.SessionID),
 		})
 	}
 	return sessions

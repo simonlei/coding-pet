@@ -320,6 +320,17 @@
       color: #92400e;
     }
 
+    .session-tokens {
+      font-size: 11px;
+      font-weight: 600;
+      color: #7dd3fc;
+      letter-spacing: 0.3px;
+    }
+
+    .session-card.waiting .session-tokens {
+      color: #92400e;
+    }
+
     .session-cwd {
       font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
       font-size: 13px;
@@ -574,6 +585,18 @@
         return div.innerHTML;
       }
 
+      // 格式化上下文占用 token：>=1000 显示为 k（如 128500 → "128k"），否则原样。
+      // 0 或缺失返回空串（前端不展示）。
+      function formatTokens(n) {
+        if (!n || n <= 0) {
+          return '';
+        }
+        if (n >= 1000) {
+          return Math.round(n / 1000) + 'k';
+        }
+        return String(n);
+      }
+
       // ---- Render ----
 
       function render(data) {
@@ -673,6 +696,11 @@
           html += '<span class="session-label">' + duration + '</span>';
           html += ' &middot; ';
           html += '<span class="session-label">' + lastActive + '</span>';
+          var wtokens = formatTokens(session.context_tokens);
+          if (wtokens) {
+            html += ' &middot; ';
+            html += '<span class="session-tokens" title="当前上下文占用">🧠 ' + wtokens + '</span>';
+          }
           html += '</div>';
           html += '</div>';
           html += '</div>';
@@ -855,6 +883,11 @@
         html += '<span class="session-label">' + duration + '</span>';
         html += ' &middot; ';
         html += '<span class="session-label">最后活跃 ' + lastActive + '</span>';
+        var tokens = formatTokens(session.context_tokens);
+        if (tokens) {
+          html += ' &middot; ';
+          html += '<span class="session-tokens" title="当前上下文占用">🧠 ' + tokens + '</span>';
+        }
         html += '</div>';
         html += '</div>';
         html += '</div>';

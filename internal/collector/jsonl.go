@@ -29,6 +29,28 @@ type JSONLEntry struct {
 	Arguments string `json:"arguments"` // function_call 的参数，JSON 字符串
 }
 
+// usageEntry 用于解析 message.usage（Claude Code 与 CodeBuddy CLI 共用此结构）。
+// Claude Code 带 cache_read/cache_creation 字段；CodeBuddy CLI 无这些字段（为 0），
+// 其 input_tokens 本身已含 cached，公式天然统一。
+type usageEntry struct {
+	Message struct {
+		Usage *struct {
+			InputTokens         int64 `json:"input_tokens"`
+			CacheReadTokens     int64 `json:"cache_read_input_tokens"`
+			CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
+		} `json:"usage"`
+	} `json:"message"`
+}
+
+// contextTokens 计算当前上下文占用：input + cache_read + cache_creation。
+func (u usageEntry) contextTokens() int64 {
+	us := u.Message.Usage
+	if us == nil {
+		return 0
+	}
+	return us.InputTokens + us.CacheReadTokens + us.CacheCreationTokens
+}
+
 // findSessionJSONL 在 ~/.codebuddy/projects/<name>/<sessionID>.jsonl 查找
 // 注意：直接在 project 目录下找，没有 sessions 子目录
 func findSessionJSONL(sessionID string) (string, bool) {
@@ -176,7 +198,51 @@ func DetermineStateFromJSONL(path string) protocol.SessionState {
 	}
 }
 
-// checkSubagentsForApproval 扫描 session 的 subagent JSONL，
+// ContextTokensFromJSONL 从 JSONL 文件读取末尾一段，反向扫描找最后一条含
+// message.usage 的记录，返回当前上下文占用 token 数。
+// 只读末尾 64KB（覆盖单条含完整 usage 的 assistant 记录），成本恒定、不全扫文件。
+// 文件不存在、无 usage 或解析失败均返回 0（优雅降级，前端不展示）。
+func ContextTokensFromJSONL(path string) int64 {
+	const blockSize = 65536 // 64KB，单条 assistant 记录可能较大
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return 0
+	}
+	seekPos := stat.Size() - blockSize
+	if seekPos < 0 {
+		seekPos = 0
+	}
+	if _, err := f.Seek(seekPos, io.SeekStart); err != nil {
+		return 0
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return 0
+	}
+
+	lines := bytes.Split(data, []byte("\n"))
+	// 从末尾向前扫描，返回第一条能解析出 usage 的记录
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if len(line) == 0 {
+			continue
+		}
+		var entry usageEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		if tokens := entry.contextTokens(); tokens > 0 {
+			return tokens
+		}
+	}
+	return 0
+}
 // 检查是否有 subagent 正在等待审批。
 // 路径推导：主 JSONL 路径去掉 .jsonl 后缀 + /subagents
 // 注：不做时间窗口过滤，因为用户可能 5 分钟后才回来审批，过滤会导致审批提示消失

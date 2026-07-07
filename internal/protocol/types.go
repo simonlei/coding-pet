@@ -42,6 +42,9 @@ type SessionInfo struct {
 	State         SessionState `json:"state"`
 	LastActivity  int64        `json:"last_activity"` // JSONL 文件最后修改时间，Unix ms
 	Version       string       `json:"version,omitempty"`
+	// ContextTokens 当前上下文占用（input_tokens + cache_read + cache_creation），
+	// 取自 JSONL 最后一条含 message.usage 的记录。0 表示无法获取（如 IDE / WorkBuddy），前端不展示。
+	ContextTokens int64 `json:"context_tokens,omitempty"`
 }
 
 // AgentReport Agent 向 Server 推送的上报数据
