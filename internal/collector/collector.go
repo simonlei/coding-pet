@@ -63,7 +63,11 @@ func (c *Collector) collectOne(home buddyHome, pf PIDFile) (protocol.SessionInfo
 		// 3. 查找并分析 JSONL
 		jsonlPath, found := findSessionJSONLIn(home.dir, pf.SessionID)
 		if !found {
-			state = protocol.StateUnknown
+			// JSONL 还没落盘：多半是刚启动、还没提问的新 session。
+			// 心跳新鲜 + 进程存活已排除掉线场景，此处保守视为 active，
+			// 与 Claude Code fresh idle 的处理对齐——不把刚打开的会话
+			// 误报成"等待中"去打扰用户。
+			state = protocol.StateActive
 		} else {
 			state = DetermineStateFromJSONL(jsonlPath)
 

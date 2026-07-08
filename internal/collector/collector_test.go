@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -57,3 +58,30 @@ func TestBuddyHomes_OnlyCodeBuddyCLI(t *testing.T) {
 		t.Errorf("did not expect a workbuddy home to be scanned (now Hook-reported)")
 	}
 }
+
+// TestCollectOne_FreshSessionNoJSONLIsActive 验证 CodeBuddy CLI 新启动会话：
+// 进程存活、心跳新鲜、但 JSONL 还没落盘时应视为 active，不再报 unknown。
+// 与 Claude Code fresh idle 的处理对齐——用户刚打开还没提问，不需要被前端提醒。
+func TestCollectOne_FreshSessionNoJSONLIsActive(t *testing.T) {
+	c := New()
+	now := time.Now().UnixMilli()
+
+	pf := PIDFile{
+		PID:           os.Getpid(),
+		SessionID:     "sess-fresh-cli-no-jsonl",
+		CWD:           "/tmp/proj",
+		StartedAt:     now - 2_000,
+		LastHeartbeat: now,
+		Kind:          "interactive",
+		Version:       "1.0.0",
+	}
+
+	info, err := c.collectOne(buddyHome{dir: t.TempDir(), tool: protocol.ToolCodeBuddy}, pf)
+	if err != nil {
+		t.Fatalf("collectOne error: %v", err)
+	}
+	if info.State != protocol.StateActive {
+		t.Errorf("expected State=active (fresh, no JSONL), got %q", info.State)
+	}
+}
+

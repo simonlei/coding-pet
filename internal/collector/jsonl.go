@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -243,6 +244,41 @@ func ContextTokensFromJSONL(path string) int64 {
 	}
 	return 0
 }
+
+// HasAssistantMessage 扫描 JSONL 判断是否已有 assistant 消息。
+// tclaude/Claude Code 的 JSONL 中，assistant 回复以顶层 "type":"assistant" 出现；
+// 新启动的 session 只有 mode / permission-mode / file-history-snapshot 等元数据行，
+// 用于区分"新启动的 idle"（还没对话）和"一轮答完的 idle"（用户至少收到过一次回复）。
+func HasAssistantMessage(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	// JSONL 每行一条记录，扫描全文找 "type":"assistant"。
+	// 对新启动的 session，文件通常只有几行，成本可忽略；
+	// 对已跑一段时间的 session，命中即返回，也不会读完全文。
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 8*1024*1024) // 单条最大 8MB
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var entry struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		if entry.Type == "assistant" {
+			return true
+		}
+	}
+	return false
+}
+
 // 检查是否有 subagent 正在等待审批。
 // 路径推导：主 JSONL 路径去掉 .jsonl 后缀 + /subagents
 // 注：不做时间窗口过滤，因为用户可能 5 分钟后才回来审批，过滤会导致审批提示消失

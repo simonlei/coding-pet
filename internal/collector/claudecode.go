@@ -126,6 +126,22 @@ func findClaudeSessionTokens(sessionID string) int64 {
 	return 0
 }
 
+// claudeSessionHasAssistant 在所有 Claude Code 配置目录下查找 sessionID 对应的 JSONL，
+// 判断是否已有 assistant 消息。JSONL 不存在（还没写盘）视为"没有"。
+// 用于区分"新启动的 idle"（还没跑过一轮，pid 文件初始就是 idle）与
+// "一轮答完的 idle"（已经和用户对话过、正等下条指令）。
+func claudeSessionHasAssistant(sessionID string) bool {
+	for _, dir := range claudeConfigDirs() {
+		if dir == "" {
+			continue
+		}
+		if path, found := findSessionJSONLIn(dir, sessionID); found {
+			return HasAssistantMessage(path)
+		}
+	}
+	return false
+}
+
 // CollectClaudeCodeSessions 扫描所有 Claude Code pid 文件，返回 session 状态列表
 func CollectClaudeCodeSessions() []protocol.SessionInfo {
 	pidFiles := readClaudeCodePIDFiles()
@@ -148,6 +164,13 @@ func CollectClaudeCodeSessions() []protocol.SessionInfo {
 			state = protocol.StateTerminated
 		} else {
 			state = mapClaudeStatus(pf.Status, pf.WaitingFor)
+			// 修正："新启动但还没对话"的 idle 会被误判为 waiting_for_input。
+			// 只有已经产生过 assistant 回复（一轮答完）的 idle 才算等待用户输入；
+			// 新启动的空 session 应保持 active，避免用户刚打开就被首页高亮提醒。
+			if state == protocol.StateWaitingForInput && pf.Status == "idle" &&
+				!claudeSessionHasAssistant(pf.SessionID) {
+				state = protocol.StateActive
+			}
 		}
 
 		sessions = append(sessions, protocol.SessionInfo{

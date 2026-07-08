@@ -222,6 +222,77 @@ func TestCollectClaudeCode_ContextTokens(t *testing.T) {
 	}
 }
 
+// TestCollectClaudeCode_IdleFreshIsActive 验证：新启动的 tclaude session 状态字段是 "idle"
+// 但还没有任何 assistant 消息（JSONL 缺失或只包含 mode/permission-mode 等元数据行），
+// 应视为 active——用户刚亲手启动，还没到"一轮答完等下条指令"的语义，不该被提醒。
+func TestCollectClaudeCode_IdleFreshIsActive(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	now := time.Now().UnixMilli()
+	pid := os.Getpid()
+
+	content := `{"pid":` + itoa(pid) + `,"sessionId":"sess-fresh","cwd":"/tmp/proj","startedAt":` +
+		i64toa(now-2_000) + `,"kind":"interactive","status":"idle","updatedAt":` +
+		i64toa(now) + `,"statusUpdatedAt":` + i64toa(now) + `}`
+	writeClaudePID(t, dir, "fresh.json", content)
+
+	// 无 JSONL 场景
+	sessions := CollectClaudeCodeSessions()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].State != protocol.StateActive {
+		t.Errorf("no JSONL: expected active (fresh idle), got %q", sessions[0].State)
+	}
+
+	// JSONL 存在但只有非 assistant 元数据
+	projDir := filepath.Join(dir, "projects", "-tmp-proj")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jsonl := `{"type":"mode","mode":"normal","sessionId":"sess-fresh"}` + "\n" +
+		`{"type":"permission-mode","permissionMode":"default","sessionId":"sess-fresh"}` + "\n"
+	if err := os.WriteFile(filepath.Join(projDir, "sess-fresh.jsonl"), []byte(jsonl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessions = CollectClaudeCodeSessions()
+	if sessions[0].State != protocol.StateActive {
+		t.Errorf("metadata-only JSONL: expected active (fresh idle), got %q", sessions[0].State)
+	}
+}
+
+// TestCollectClaudeCode_IdleAfterAssistantIsWaiting 验证：JSONL 中已有 assistant 消息
+// （用户至少完成过一轮对话）时，idle 仍映射为 waiting_for_input——这就是"一轮答完等下条指令"的语义。
+func TestCollectClaudeCode_IdleAfterAssistantIsWaiting(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	now := time.Now().UnixMilli()
+	pid := os.Getpid()
+
+	content := `{"pid":` + itoa(pid) + `,"sessionId":"sess-done","cwd":"/tmp/proj","startedAt":` +
+		i64toa(now-60_000) + `,"kind":"interactive","status":"idle","updatedAt":` +
+		i64toa(now) + `,"statusUpdatedAt":` + i64toa(now) + `}`
+	writeClaudePID(t, dir, "done.json", content)
+
+	projDir := filepath.Join(dir, "projects", "-tmp-proj")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	jsonl := `{"type":"mode","mode":"normal"}` + "\n" +
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projDir, "sess-done.jsonl"), []byte(jsonl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions := CollectClaudeCodeSessions()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].State != protocol.StateWaitingForInput {
+		t.Errorf("expected waiting_for_input (idle after assistant), got %q", sessions[0].State)
+	}
+}
+
 // TestCollectClaudeCode_NoJSONL_TokensZero 验证：无对应 JSONL 时 ContextTokens 降级为 0，不报错。
 func TestCollectClaudeCode_NoJSONL_TokensZero(t *testing.T) {
 	dir := t.TempDir()
