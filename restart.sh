@@ -25,7 +25,7 @@ AGENT_ID="${AGENT_ID:-}"                       # 机器唯一 ID,空则用 hostn
 AGENT_INTERVAL="${AGENT_INTERVAL:-5s}"         # 上报间隔
 # -------------------------------------------------------------------------
 
-LOG_DIR="${LOG_DIR:-$PWD/logs}"
+LOG_DIR="${LOG_DIR:-$PWD}"
 mkdir -p "$LOG_DIR"
 
 TARGET="${1:-all}"
@@ -54,8 +54,8 @@ start_server() {
     local args=(--port "$SERVER_PORT")
     [[ -n "$SERVER_TOKEN" ]] && args+=(--token "$SERVER_TOKEN")
     echo "[restart] 启动 server: ./coding-pet-server ${args[*]}"
-    nohup ./coding-pet-server "${args[@]}" > "$LOG_DIR/server.log" 2>&1 &
-    echo "[restart] server pid=$! 日志=$LOG_DIR/server.log"
+    nohup ./coding-pet-server "${args[@]}" > "$LOG_DIR/coding-pet-server.log" 2>&1 &
+    echo "[restart] server pid=$! 日志=$LOG_DIR/coding-pet-server.log"
 }
 
 start_agent() {
@@ -64,8 +64,8 @@ start_agent() {
     [[ -n "$AGENT_TOKEN" ]] && args+=(--token "$AGENT_TOKEN")
     [[ -n "$AGENT_ID" ]] && args+=(--id "$AGENT_ID")
     echo "[restart] 启动 agent: ./coding-pet-agent ${args[*]}"
-    nohup ./coding-pet-agent "${args[@]}" > "$LOG_DIR/agent.log" 2>&1 &
-    echo "[restart] agent pid=$! 日志=$LOG_DIR/agent.log"
+    nohup ./coding-pet-agent "${args[@]}" > "$LOG_DIR/coding-pet-agent.log" 2>&1 &
+    echo "[restart] agent pid=$! 日志=$LOG_DIR/coding-pet-agent.log"
 }
 
 # ---- 编译 ----------------------------------------------------------------

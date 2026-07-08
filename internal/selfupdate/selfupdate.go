@@ -141,9 +141,9 @@ func CheckAndUpdate(opts Options) (bool, error) {
 	return true, nil // 生产环境走不到（os.Exit 已终止）；测试注入 exit 时返回。
 }
 
-// defaultLogFile 按 restart.sh 的约定返回 <exeDir>/logs/<kind>.log。
+// defaultLogFile 返回 <exeDir>/coding-pet-<kind>.log，与 applog.Setup 落点一致。
 func defaultLogFile(exeDir, kind string) string {
-	return filepath.Join(exeDir, "logs", kind+".log")
+	return filepath.Join(exeDir, "coding-pet-"+kind+".log")
 }
 
 // InferKind 依可执行文件名推断 Kind（"agent"/"server"），无法判定时返回空串。

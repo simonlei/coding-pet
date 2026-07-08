@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/simonlei/coding-pet-dashboard/internal/applog"
 	"github.com/simonlei/coding-pet-dashboard/internal/selfupdate"
 	"github.com/simonlei/coding-pet-dashboard/internal/server"
 )
@@ -43,6 +44,8 @@ func main() {
 		runSelfUpdateOnce(nil)
 		return
 	}
+
+	applog.Setup("server")
 
 	addr := net.JoinHostPort("0.0.0.0", *port)
 

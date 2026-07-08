@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/simonlei/coding-pet-dashboard/internal/applog"
 	"github.com/simonlei/coding-pet-dashboard/internal/collector"
 	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 	"github.com/simonlei/coding-pet-dashboard/internal/selfupdate"
@@ -49,6 +50,8 @@ func main() {
 	if *serverURL == "" {
 		log.Fatal("--server is required (or set DASHBOARD_SERVER)")
 	}
+
+	applog.Setup("agent")
 
 	// 解析 hostname 和 machine_id
 	actualHostname, err := os.Hostname()
