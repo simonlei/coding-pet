@@ -10,6 +10,8 @@
 - **无 PID 工具的自动降级**：CodeBuddy IDE 与 WorkBuddy 无法感知 IDE/应用是否已关闭，会话进入「等待输入」超过 3 分钟后撤下顶部闪烁提醒，仅在机器列表里以淡黄色卡片保留（采集端 30 分钟后不再上报）。
 - **多机器汇总**：各开发机运行 Agent，上报到中心 Server；机器列表按「等待优先 > 在线优先 > MachineID」稳定排序。
 - **离线检测**：90 秒无上报标记为离线，离线机器的 session 状态显示为 `unknown`（避免显示过期的「等待输入」）；离线超过 24 小时后从内存清理。
+- **自动更新**：Agent 与 Server 默认开启后台自更新，每 30 分钟（带抖动）向 GitHub Release 查询新版本，检测到更新即下载对应平台产物并原地替换重启；也支持 `--self-update` 手动触发一次。可用 `--auto-update=false` 或 `CODING_PET_AUTO_UPDATE=false` 关闭，配置 `GITHUB_TOKEN` 可将匿名 60/hr 的调用限额提升至 5000/hr。
+- **安卓客户端 + 伪熄屏**：随仓库提供 [Android WebView 客户端](android/README.md)，全屏显示仪表盘并 `FLAG_KEEP_SCREEN_ON` 保持常亮；可配置「伪黑屏时段」（默认 18:00 → 次日 09:00），进入时段后叠加黑色遮罩 + 亮度缓慢衰减到最低，页面仍在后台实时刷新；出现「等待输入/等待审批」提醒时自动回到全亮以引起注意，触摸屏幕可临时唤醒 10 秒。
 
 ## 架构
 
@@ -119,6 +121,9 @@ http://<中心服务器IP>:3000
 |------|--------|------|
 | `--port` | 3000 | 监听端口 |
 | `--token` | 空（无认证） | Agent 上报认证 token，为空时跳过认证 |
+| `--version` | - | 打印版本并退出 |
+| `--self-update` | false | 立即向 GitHub Release 检查一次更新，有新版则替换重启后退出 |
+| `--auto-update` | true | 后台每 30 分钟（带抖动）自动检查更新，可用 `CODING_PET_AUTO_UPDATE=false` 关闭 |
 
 ### coding-pet-agent
 
@@ -129,6 +134,11 @@ http://<中心服务器IP>:3000
 | `--id` | hostname | 唯一机器 ID（或 `DASHBOARD_ID`） |
 | `--hostname` | os.Hostname() | 显示名 |
 | `--interval` | 1s | 上报间隔 |
+| `--version` | - | 打印版本并退出 |
+| `--self-update` | false | 立即向 GitHub Release 检查一次更新，有新版则替换重启后退出 |
+| `--auto-update` | true | 后台每 30 分钟（带抖动）自动检查更新，可用 `CODING_PET_AUTO_UPDATE=false` 关闭 |
+
+> **自动更新**：Server 在升级前会先关掉监听释放端口再替换二进制；Agent 直接原地替换。默认匿名访问 GitHub API（60 次/小时），可通过环境变量 `GITHUB_TOKEN` 提升到 5000 次/小时。
 
 ## API
 
@@ -163,8 +173,10 @@ internal/
 
 ### 手机屏幕自动熄屏
 
-`Wake Lock API` 在 HTTP 页面下部分浏览器不支持（需要 HTTPS）。
-推荐备用方案：手机设置 → 显示 → 屏幕超时 → 设为「永不」。
+`Wake Lock API` 在 HTTP 页面下部分浏览器不支持（需要 HTTPS）。推荐两种方案：
+
+1. **安装安卓客户端**（推荐）：使用 [`android/`](android/README.md) 目录下的 WebView 应用，靠系统级 `FLAG_KEEP_SCREEN_ON` 保持常亮，还支持夜间伪黑屏（页面仍实时刷新，出现等待提醒时自动回到全亮）。
+2. **系统设置兜底**：手机 → 显示 → 屏幕超时 → 设为「永不」。
 
 ### 多台机器 hostname 相同
 

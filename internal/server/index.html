@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Coding Pet Dashboard</title>
+  <title>Coding Pet</title>
   <style>
     *, *::before, *::after {
       box-sizing: border-box;
@@ -35,6 +35,13 @@
       font-weight: 700;
       color: #ffffff;
       letter-spacing: 1px;
+    }
+
+    .header .version {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #7d8ba8;
+      letter-spacing: 0.5px;
     }
 
     /* Stats Bar */
@@ -480,7 +487,8 @@
 <body>
   <div class="container" id="app">
     <div class="header">
-      <h1>Coding Pet Dashboard</h1>
+      <h1>Coding Pet</h1>
+      <div class="version" id="serverVersion"></div>
     </div>
 
     <div class="stats" id="statsBar">
@@ -649,6 +657,12 @@
           String(data.active_count != null ? data.active_count : 0);
         document.getElementById('statMachines').textContent =
           String((data.machines ? data.machines.length : 0)) + '台';
+
+        // Render server version（由 server 通过 ldflags 注入，缺失时不展示）
+        var versionEl = document.getElementById('serverVersion');
+        if (versionEl) {
+          versionEl.textContent = data.server_version ? ('v' + String(data.server_version).replace(/^v/, '')) : '';
+        }
 
         // Render waiting section
         renderWaitingSection(waitingSessions);
