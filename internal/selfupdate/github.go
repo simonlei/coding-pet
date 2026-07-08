@@ -1,7 +1,6 @@
 package selfupdate
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -26,10 +25,10 @@ const (
 	userAgent = "coding-pet-selfupdate"
 	// shaSumsAsset 是 release 中校验和清单的资产名。
 	shaSumsAsset = "SHA256SUMS.txt"
-	// archiveDownloadTimeout 是归档下载的总超时（覆盖握手+body）。
-	// 二进制包几 MB 到几十 MB，跨境网络慢时 30s 完全不够；给足 10 分钟。
-	// 小请求（release JSON、SHA256SUMS）仍走 Client.Timeout 的 30s 快失败。
-	archiveDownloadTimeout = 10 * time.Minute
+	// httpTimeout 统一控制所有 HTTP 请求超时（release JSON、SHA256SUMS、归档下载）。
+	// 跨境网络慢时连几百字节的 SHA256SUMS 都会撞 30s Client.Timeout；统一放宽到 30 分钟，
+	// 让所有请求走同一条慢路径都能完成，靠 auto.go 的定时器控制重试节奏而非硬超时。
+	httpTimeout = 30 * time.Minute
 )
 
 // Asset 对应 release 的一个可下载资产。
@@ -58,7 +57,7 @@ type Client struct {
 func NewClient() *Client {
 	return &Client{
 		APIBase: defaultAPIBase,
-		HTTP:    &http.Client{Timeout: 30 * time.Second},
+		HTTP:    &http.Client{Timeout: httpTimeout},
 		Token:   strings.TrimSpace(os.Getenv("GITHUB_TOKEN")),
 	}
 }
@@ -252,11 +251,6 @@ func (c *Client) DownloadAndVerify(archive, shaSums Asset, destDir string) (stri
 	}
 	req.Header.Set("User-Agent", userAgent)
 	c.applyAuth(req)
-	// 归档下载超时独立控制：Client.Timeout(30s) 对小请求友好，但覆盖 body 读取后
-	// 大文件跨境慢速下载必然失败。这里用 per-request context 覆盖之。
-	ctx, cancel := context.WithTimeout(context.Background(), archiveDownloadTimeout)
-	defer cancel()
-	req = req.WithContext(ctx)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		tmp.Close()
