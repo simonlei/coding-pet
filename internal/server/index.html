@@ -61,13 +61,16 @@
     }
 
     .stat-value.waiting {
-      color: #f59e0b;
+      color: #fbbf24;
     }
 
-    .stat-value.approval {
-      color: #fbbf24;
-      font-weight: 700;
+    .stat-value.waiting.has-approval {
       animation: pulse-fast .8s ease-in-out infinite;
+      font-weight: 700;
+    }
+
+    .stat-value.completed {
+      color: #eab308;
     }
 
     .stat-value.active {
@@ -482,12 +485,12 @@
 
     <div class="stats" id="statsBar">
       <div class="stat-item">
-        <span>审批:</span>
-        <span class="stat-value approval" id="statApproval">0</span>
-      </div>
-      <div class="stat-item">
         <span>等待:</span>
         <span class="stat-value waiting" id="statWaiting">0</span>
+      </div>
+      <div class="stat-item">
+        <span>已完成:</span>
+        <span class="stat-value completed" id="statCompleted">0</span>
       </div>
       <div class="stat-item">
         <span>活跃:</span>
@@ -515,25 +518,19 @@
       var lastData = null;
       var expandedMachines = {};
 
-      // 磁盘上无 PID 文件、无法感知 IDE 关闭的工具（CodeBuddy IDE 扫 history 目录、
-      // WorkBuddy 读 SQLite）。这类会话进入 waiting_for_input 后若 IDE 被直接关闭，
-      // 只能靠时间衰减，因此顶部闪烁提醒不宜长期占用（采集端 30 分钟后即不再上报）。
-      var HOOK_ONLY_TOOLS = { codebuddy_ide: true, workbuddy: true };
+      // 「等待输入」超过此时长后视为「已完成」：撤下顶部金黄闪烁提醒，
+      // 仅在机器列表里以淡黄「已完成」卡片保留。所有工具统一采用此规则。
+      // waiting_for_approval（等待审批）不受此降级影响，因为审批阻塞了 agent 工作，
+      // 比等待用户输入更紧急，应一直保持提醒直到用户处理。
+      var DONE_AFTER_MS = 3 * 60 * 1000;
 
-      // Hook 类工具进入“等待输入”超过此时长后，认为多半已完成/IDE 已关闭：
-      // 撤下顶部金黄闪烁提醒，仅在机器列表里以淡黄色“已完成”卡片保留。
-      var IDE_DONE_AFTER_MS = 3 * 60 * 1000;
-
-      // 判断某会话是否为“Hook 工具已完成、应降级展示”的状态。
-      function isHookWaitingDone(session) {
+      // 判断某会话是否为「等待用户输入超时、应降级为已完成」的状态。
+      function isWaitingDone(session) {
         if (!session || session.state !== 'waiting_for_input') {
           return false;
         }
-        if (!HOOK_ONLY_TOOLS[session.tool]) {
-          return false;
-        }
         var last = session.last_activity || 0;
-        return (Date.now() - last) > IDE_DONE_AFTER_MS;
+        return (Date.now() - last) > DONE_AFTER_MS;
       }
 
       // ---- Utility ----
@@ -604,8 +601,15 @@
           return;
         }
 
-        var approvalSessions = [];
+        // 三类状态：
+        //   waitingSessions  → 顶部金黄闪烁「⚡ 等待输入」区（审批 + 未超时的等待输入）
+        //   completedSessions → 顶部计数「已完成」，机器列表内淡黄降级卡片（超时的等待输入）
+        //   活跃数由后端 data.active_count 提供
+        // 审批与等待输入合并为「等待」一类，都是等用户输入才能继续；
+        // 审批因阻塞 agent 工作更紧急，保留独立的更醒目样式，但计数与等待合并。
         var waitingSessions = [];
+        var completedSessions = [];
+        var hasApproval = false;
         var onlineMachines = [];
         var offlineMachines = [];
 
@@ -622,47 +626,41 @@
 
           machine.sessions.forEach(function (session) {
             if (session.state === 'waiting_for_approval') {
-              approvalSessions.push({
-                machine: machine,
-                session: session
-              });
+              waitingSessions.push({ machine: machine, session: session });
+              hasApproval = true;
             } else if (session.state === 'waiting_for_input') {
-              // Hook 类工具等待超时后不再置顶闪烁，改为机器列表内淡黄色降级展示。
-              if (isHookWaitingDone(session)) {
-                return;
+              if (isWaitingDone(session)) {
+                completedSessions.push({ machine: machine, session: session });
+              } else {
+                waitingSessions.push({ machine: machine, session: session });
               }
-              waitingSessions.push({
-                machine: machine,
-                session: session
-              });
             }
           });
         });
 
-        // Update stats
-        // 等待数用前端过滤后的结果，与顶部“等待输入”区保持一致
-        // （Hook 工具超时降级的会话不再计入）。
-        document.getElementById('statWaiting').textContent =
-          String(waitingSessions.length);
-        document.getElementById('statApproval').textContent =
-          String(data.approval_count != null ? data.approval_count : 0);
+        // 顶部审批 + 等待合并计数；有审批时闪烁以保留紧迫感。
+        var statWaitingEl = document.getElementById('statWaiting');
+        statWaitingEl.textContent = String(waitingSessions.length);
+        statWaitingEl.classList.toggle('has-approval', hasApproval);
+
+        document.getElementById('statCompleted').textContent =
+          String(completedSessions.length);
         document.getElementById('statActive').textContent =
           String(data.active_count != null ? data.active_count : 0);
         document.getElementById('statMachines').textContent =
           String((data.machines ? data.machines.length : 0)) + '台';
 
         // Render waiting section
-        renderWaitingSection(approvalSessions.concat(waitingSessions));
+        renderWaitingSection(waitingSessions);
 
         // Render machine list
         renderMachineList(onlineMachines, offlineMachines);
 
-        // 通知 Android 宿主：当前需要处理的会话总数 (审批 + 等待输入)。
+        // 通知 Android 宿主：当前需要处理的会话总数（审批 + 等待输入，不含已完成）。
         // 桌面浏览器下 window.CodingPetHost 不存在，try/catch 保底。
         try {
           if (window.CodingPetHost && typeof window.CodingPetHost.setAlert === 'function') {
-            var pending = approvalSessions.length + waitingSessions.length;
-            window.CodingPetHost.setAlert(pending);
+            window.CodingPetHost.setAlert(waitingSessions.length);
           }
         } catch (e) { /* ignore */ }
 
@@ -857,8 +855,8 @@
         var stateClass = session.state || 'unknown';
         var stateLabel = '';
 
-        // Hook 工具等待超时：降级为“已完成”淡黄卡片（不闪烁、不置顶）。
-        if (isHookWaitingDone(session)) {
+        // 等待用户输入超过 3 分钟：降级为「已完成」淡黄卡片（不闪烁、不置顶）。
+        if (isWaitingDone(session)) {
           stateClass = 'ide-done';
           stateLabel = '已完成';
         } else {
