@@ -91,18 +91,24 @@ func readClaudeCodePIDFiles() []claudePIDFile {
 }
 
 // mapClaudeStatus 将 Claude Code 的 status + waitingFor 映射到 SessionState。
-//   - busy / shell / idle / 其它 → active（idle 表示等待下一条用户指令，并非被权限阻塞，不闪烁）
+//   - busy / shell / 其它 → active
+//   - idle → waiting_for_input（一轮答完等下条指令，与 CodeBuddy IDE 的 complete 语义一致；
+//     前端 3 分钟后自动降级为「已完成」淡黄卡片）
 //   - waiting + 权限类原因（permission prompt / sandbox request / worker request）→ waiting_for_approval
 //   - waiting + 其它原因（dialog open / input needed / 未知）→ waiting_for_input
 func mapClaudeStatus(status, waitingFor string) protocol.SessionState {
-	if status != "waiting" {
-		return protocol.StateActive
-	}
-	switch waitingFor {
-	case "permission prompt", "sandbox request", "worker request":
-		return protocol.StateWaitingForApproval
-	default:
+	switch status {
+	case "idle":
 		return protocol.StateWaitingForInput
+	case "waiting":
+		switch waitingFor {
+		case "permission prompt", "sandbox request", "worker request":
+			return protocol.StateWaitingForApproval
+		default:
+			return protocol.StateWaitingForInput
+		}
+	default:
+		return protocol.StateActive
 	}
 }
 

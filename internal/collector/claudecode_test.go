@@ -18,7 +18,9 @@ func TestMapClaudeStatus(t *testing.T) {
 	}{
 		{"busy is active", "busy", "", protocol.StateActive},
 		{"shell is active", "shell", "", protocol.StateActive},
-		{"idle is active", "idle", "", protocol.StateActive},
+		// idle 表示一轮答完、等用户下条指令，语义与 CodeBuddy IDE 的 complete 一致：
+		// 映射为 waiting_for_input，让前端 3 分钟后降级为「已完成」淡黄卡片。
+		{"idle is waiting_for_input", "idle", "", protocol.StateWaitingForInput},
 		{"empty is active", "", "", protocol.StateActive},
 		{"unknown is active", "frobnicate", "", protocol.StateActive},
 		{"waiting permission prompt is approval", "waiting", "permission prompt", protocol.StateWaitingForApproval},
