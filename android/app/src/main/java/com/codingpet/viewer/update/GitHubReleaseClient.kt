@@ -32,6 +32,9 @@ internal class GitHubReleaseClient(
         const val USER_AGENT = "coding-pet-android-updater"
         const val SHA_SUMS_ASSET = "SHA256SUMS-android.txt"
 
+        /** Android release 的 tag 前缀,与 Go 端 v* tag 区分,避免服务端发版误触发 Android 升级。 */
+        const val ANDROID_TAG_PREFIX = "android-v"
+
         /** 一次网络请求的超时(毫秒)。GitHub API 与 Release CDN 都要够宽。 */
         const val CONNECT_TIMEOUT_MS = 15_000
         const val READ_TIMEOUT_MS = 30_000
@@ -77,16 +80,52 @@ internal class GitHubReleaseClient(
     data class Selected(val apk: Asset, val shaSums: Asset?, val isSigned: Boolean)
 
     /**
-     * 拉取最新正式版 Release。GitHub /releases/latest 会自动跳过 draft/prerelease。
-     * 网络/解析异常直接抛出,调用方 catch 后视为本轮检查失败(不影响 App)。
+     * 拉取最新的 Android release。
+     *
+     * 由于仓库同时有 Go agent/server 的 `v*` tag 和 Android 的 `android-v*` tag,
+     * GitHub `/releases/latest` 只会返回全仓库最新 release,可能是 Go 端的,不适合 Android 使用。
+     * 因此改为拉取 `/releases`(默认最近 30 条),按前缀过滤并按 semver 取最大版本。
+     *
+     * @return 匹配的 Android release, 若无则返回 null(调用方应视为"无更新")
      */
-    fun fetchLatest(): Release {
-        val url = "${apiBase.trimEnd('/')}/repos/$repoSlug/releases/latest"
+    fun fetchLatestAndroid(): Release? {
+        val url = "${apiBase.trimEnd('/')}/repos/$repoSlug/releases?per_page=30"
         val body = httpGet(url, accept = "application/vnd.github+json")
-        val json = JSONObject(String(body, StandardCharsets.UTF_8))
-        val tag = json.optString("tag_name").ifBlank {
-            throw IllegalStateException("release has empty tag_name")
+        val arr = org.json.JSONArray(String(body, StandardCharsets.UTF_8))
+        var best: Release? = null
+        var bestKey: Triple<Int, Int, Int>? = null
+        for (i in 0 until arr.length()) {
+            val j = arr.getJSONObject(i)
+            if (j.optBoolean("draft", false)) continue
+            if (j.optBoolean("prerelease", false)) continue
+            val tag = j.optString("tag_name")
+            if (!tag.startsWith(ANDROID_TAG_PREFIX)) continue
+            val semver = tag.removePrefix(ANDROID_TAG_PREFIX)
+            val key = parseKey(semver) ?: continue
+            if (bestKey == null || compareKey(key, bestKey!!) > 0) {
+                bestKey = key
+                best = parseRelease(j)
+            }
         }
+        return best
+    }
+
+    private fun parseKey(v: String): Triple<Int, Int, Int>? {
+        val core = v.substringBefore('-').substringBefore('+')
+        val parts = core.split('.')
+        if (parts.size != 3) return null
+        val nums = parts.map { it.toIntOrNull() ?: return null }
+        return Triple(nums[0], nums[1], nums[2])
+    }
+
+    private fun compareKey(a: Triple<Int, Int, Int>, b: Triple<Int, Int, Int>): Int {
+        if (a.first != b.first) return a.first - b.first
+        if (a.second != b.second) return a.second - b.second
+        return a.third - b.third
+    }
+
+    private fun parseRelease(json: JSONObject): Release {
+        val tag = json.optString("tag_name")
         val assetsArr = json.optJSONArray("assets")
         val assets = mutableListOf<Asset>()
         if (assetsArr != null) {
@@ -106,6 +145,20 @@ internal class GitHubReleaseClient(
             htmlUrl = json.optString("html_url", ""),
             assets = assets,
         )
+    }
+
+    /**
+     * @deprecated 保留用于调试; 生产路径使用 fetchLatestAndroid()。
+     * 拉取仓库全局最新正式版 Release(可能是 Go 端 v* tag,不建议用于 Android 更新检查)。
+     */
+    fun fetchLatest(): Release {
+        val url = "${apiBase.trimEnd('/')}/repos/$repoSlug/releases/latest"
+        val body = httpGet(url, accept = "application/vnd.github+json")
+        val json = JSONObject(String(body, StandardCharsets.UTF_8))
+        val tag = json.optString("tag_name").ifBlank {
+            throw IllegalStateException("release has empty tag_name")
+        }
+        return parseRelease(json).copy(tagName = tag)
     }
 
     /**

@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   push:
     branches: [main, master]
-    tags: ['v*']
+    tags: ['android-v*']
     paths:
       - 'android/**'
       - '.github/workflows/android.yml'
@@ -46,8 +46,12 @@ jobs:
         id: vars
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME}"
-          if [[ "${GITHUB_REF}" != refs/tags/* ]]; then
+          REF_NAME="${GITHUB_REF_NAME}"
+          # tag 触发: android-vX.Y.Z → 剥掉 android- 前缀,得到 vX.Y.Z 作为版本号
+          # 非 tag 触发(分支/PR/手动): 用 dev-<sha> 作为占位版本
+          if [[ "${GITHUB_REF}" == refs/tags/android-v* ]]; then
+            VERSION="${REF_NAME#android-}"
+          else
             VERSION="dev-$(git rev-parse --short HEAD)"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -121,7 +125,7 @@ jobs:
 
   release:
     name: Attach APK to Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/android-v')
     needs: build-apk
     runs-on: ubuntu-latest
     steps:

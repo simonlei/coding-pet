@@ -15,12 +15,14 @@ val hasReleaseSigning = !ksPath.isNullOrBlank() && !ksPassword.isNullOrBlank()
         && file(ksPath!!).exists()
 
 // 版本号解析:与 Go 端 ldflags 注入保持一致的思路
-// CI: GITHUB_REF_NAME=vX.Y.Z(tag 触发) 或 分支名/dev-<sha>(非 tag)
+// CI: GITHUB_REF_NAME=android-vX.Y.Z(tag 触发) 或 分支名/dev-<sha>(非 tag)
 // 本地: 无 GITHUB_REF_NAME,回退 "0.1.1"
 // versionName 存 "X.Y.Z"(不带 v);非 semver(如 dev-abc)时置为 "0.0.0" 便于自更新识别为需升级
 val rawRef: String = (System.getenv("GITHUB_REF_NAME") ?: "0.1.1").trim()
+// 先剥掉 android- 前缀(如果存在),再交给 semver 正则
+val refForSemver: String = rawRef.removePrefix("android-")
 val semverRegex = Regex("^v?(\\d+)\\.(\\d+)\\.(\\d+)(?:[-+].*)?$")
-val semverMatch = semverRegex.matchEntire(rawRef)
+val semverMatch = semverRegex.matchEntire(refForSemver)
 val appVersionName: String = if (semverMatch != null) {
     val (maj, min, pat) = semverMatch.destructured
     "$maj.$min.$pat"
@@ -93,4 +95,5 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }
+
 

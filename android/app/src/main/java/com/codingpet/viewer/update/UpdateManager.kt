@@ -130,12 +130,21 @@ class UpdateManager(private val appContext: Context) {
     suspend fun checkOnce(showNoUpdateToast: Boolean): CheckResult = withContext(Dispatchers.IO) {
         val local = currentVersion()
         try {
-            val rel = client.fetchLatest()
+            val rel = client.fetchLatestAndroid()
             Prefs.get(appContext).edit {
                 putLong(Prefs.KEY_UPDATE_LAST_CHECK_MS, System.currentTimeMillis())
             }
+            if (rel == null) {
+                Log.i(TAG, "no android-v* release found on remote")
+                val r = CheckResult(ok = true, latestTag = null, hasUpdate = false)
+                lastResult = r
+                return@withContext r
+            }
+            // Android tag 形如 android-v0.1.2,比较时剥掉 android- 前缀
+            val remoteSemver = rel.tagName.removePrefix(GitHubReleaseClient.ANDROID_TAG_PREFIX)
+                .let { if (it == rel.tagName) it.removePrefix("v") else it }
             val newer = try {
-                isRemoteNewer(rel.tagName, local)
+                isRemoteNewer(remoteSemver, local)
             } catch (e: IllegalArgumentException) {
                 Log.w(TAG, "invalid remote tag ${rel.tagName}: $e")
                 false
@@ -283,7 +292,8 @@ class UpdateManager(private val appContext: Context) {
 
         scope.launch {
             val outcome: Result<File> = runCatching {
-                val rel = client.fetchLatest()
+                val rel = client.fetchLatestAndroid()
+                    ?: throw IllegalStateException("no android release available")
                 val sel = rel.selectApk()
                     ?: throw IllegalStateException("no APK asset in release ${rel.tagName}")
                 val expected = sel.shaSums?.let {
