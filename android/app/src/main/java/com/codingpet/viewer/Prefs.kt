@@ -13,6 +13,12 @@ object Prefs {
     const val KEY_LOW_BRIGHTNESS = "low_brightness" // 0..100 平时衰减到的最低亮度
     const val KEY_FADE_SECONDS = "fade_seconds"     // 触摸后到达最低亮度的时长(秒)
 
+    // ===== 自动更新相关 =====
+    const val KEY_UPDATE_AUTO = "update_auto_check"          // 是否启用自动检查
+    const val KEY_UPDATE_LAST_CHECK_MS = "update_last_check_ms" // 上次检查时间戳(ms)
+    const val KEY_UPDATE_LAST_SEEN_TAG = "update_last_seen_tag" // 上次已提示过的远端 tag,避免重复弹窗
+    const val KEY_UPDATE_SKIP_TAG = "update_skip_tag"        // 用户主动"跳过"的版本
+
     // 默认: 18:00 -> 09:00
     const val DEFAULT_URL = "http://10.0.2.2:3000/"
     const val DEFAULT_START = 18 * 60
@@ -20,6 +26,7 @@ object Prefs {
     const val DEFAULT_BRIGHTNESS = 0
     const val DEFAULT_LOW_BRIGHTNESS = 5
     const val DEFAULT_FADE_SECONDS = 60
+    const val DEFAULT_UPDATE_AUTO = true
 
     fun get(ctx: Context) = PreferenceManager.getDefaultSharedPreferences(ctx)
 
@@ -32,6 +39,11 @@ object Prefs {
     fun dimBrightness(ctx: Context) = get(ctx).getInt(KEY_DIM_BRIGHTNESS, DEFAULT_BRIGHTNESS)
     fun lowBrightness(ctx: Context) = get(ctx).getInt(KEY_LOW_BRIGHTNESS, DEFAULT_LOW_BRIGHTNESS)
     fun fadeSeconds(ctx: Context) = get(ctx).getInt(KEY_FADE_SECONDS, DEFAULT_FADE_SECONDS)
+
+    fun updateAutoCheck(ctx: Context) = get(ctx).getBoolean(KEY_UPDATE_AUTO, DEFAULT_UPDATE_AUTO)
+    fun updateLastCheckMs(ctx: Context) = get(ctx).getLong(KEY_UPDATE_LAST_CHECK_MS, 0L)
+    fun updateLastSeenTag(ctx: Context): String? = get(ctx).getString(KEY_UPDATE_LAST_SEEN_TAG, null)
+    fun updateSkipTag(ctx: Context): String? = get(ctx).getString(KEY_UPDATE_SKIP_TAG, null)
 
     /**
      * 判断当前时间是否处于"黑屏时段"。
@@ -75,3 +87,4 @@ object Prefs {
         return String.format("%02d:%02d", h, m)
     }
 }
+

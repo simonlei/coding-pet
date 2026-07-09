@@ -96,6 +96,39 @@
                 <TextView android:id="@+id/txtFade" style="@style/SettingValue"/>
             </LinearLayout>
 
+            <View style="@style/Divider"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="12dp"
+                android:gravity="center_vertical">
+                <TextView style="@style/SettingLabel" android:text="@string/update_settings_auto"/>
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchAutoUpdate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <LinearLayout
+                android:id="@+id/rowVersion"
+                style="@style/SettingRow">
+                <TextView style="@style/SettingLabel" android:text="@string/update_settings_current"/>
+                <TextView android:id="@+id/txtVersion" style="@style/SettingValue"/>
+            </LinearLayout>
+
+            <View style="@style/Divider"/>
+
+            <LinearLayout
+                android:id="@+id/rowCheckUpdate"
+                style="@style/SettingRow">
+                <TextView style="@style/SettingLabel" android:text="@string/update_settings_check"/>
+                <TextView android:id="@+id/txtUpdateStatus" style="@style/SettingValue"/>
+            </LinearLayout>
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
