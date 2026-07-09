@@ -65,14 +65,15 @@ jobs:
 
       - name: Decode signing keystore
         id: sign
-        if: env.KEYSTORE_BASE64 != ''
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        if: ${{ env.KEYSTORE_BASE64 != '' }}
         shell: bash
         run: |
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
           echo "keystore=$RUNNER_TEMP/release.keystore" >> "$GITHUB_OUTPUT"
           echo "signed=true" >> "$GITHUB_OUTPUT"
+          ls -la "$RUNNER_TEMP/release.keystore"
 
       - name: Build Debug APK
         shell: bash
@@ -86,6 +87,19 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Verify Release APK signature
+        if: steps.sign.outputs.signed == 'true'
+        shell: bash
+        run: |
+          REL="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$REL" ]; then
+            echo "ERROR: signed release apk not found: $REL"
+            ls -la app/build/outputs/apk/release/ || true
+            exit 1
+          fi
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$REL" || \
+            "$ANDROID_HOME"/build-tools/*/apksigner verify --verbose "$REL"
 
       - name: Rename APKs
         id: rename
@@ -153,3 +167,4 @@ jobs:
             dist/*.apk
             dist/SHA256SUMS-android.txt
           generate_release_notes: true
+

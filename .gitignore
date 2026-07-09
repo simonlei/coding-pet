@@ -22,3 +22,9 @@
 *.swp
 .idea/
 .vscode/
+
+# Android signing (NEVER commit keystore or credentials)
+*.keystore
+*.jks
+release.keystore
+keystore.properties
