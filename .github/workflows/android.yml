@@ -75,6 +75,25 @@ jobs:
           echo "signed=true" >> "$GITHUB_OUTPUT"
           ls -la "$RUNNER_TEMP/release.keystore"
 
+      - name: Validate signing secrets
+        if: steps.sign.outputs.signed == 'true'
+        env:
+          KS_PWD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PWD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          missing=()
+          [ -z "$KS_PWD"    ] && missing+=("ANDROID_KEYSTORE_PASSWORD")
+          [ -z "$KEY_ALIAS" ] && missing+=("ANDROID_KEY_ALIAS")
+          [ -z "$KEY_PWD"   ] && missing+=("ANDROID_KEY_PASSWORD")
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing signing secrets: ${missing[*]}"
+            echo "Please configure them in repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "All signing secrets are present."
+
       - name: Build Debug APK
         shell: bash
         run: gradle assembleDebug --no-daemon --stacktrace
@@ -167,4 +186,5 @@ jobs:
             dist/*.apk
             dist/SHA256SUMS-android.txt
           generate_release_notes: true
+
 
