@@ -14,6 +14,11 @@ val hasReleaseSigning = ksPath.isNotBlank() && ksPassword.isNotBlank()
         && ksKeyAlias.isNotBlank() && ksKeyPassword.isNotBlank()
         && file(ksPath).exists()
 
+// 诊断输出:CI 上确认签名配置是否被正确解析(不打印敏感明文)
+println("[signing] ksPath='${ksPath}' exists=${if (ksPath.isNotBlank()) file(ksPath).exists() else false}")
+println("[signing] ksPassword.len=${ksPassword.length} keyAlias='${ksKeyAlias}' keyPassword.len=${ksKeyPassword.length}")
+println("[signing] hasReleaseSigning=${hasReleaseSigning}")
+
 // 版本号解析:与 Go 端 ldflags 注入保持一致的思路
 // CI: GITHUB_REF_NAME=android-vX.Y.Z(tag 触发) 或 分支名/dev-<sha>(非 tag)
 // 本地: 无 GITHUB_REF_NAME,回退 "0.1.1"
@@ -95,6 +100,3 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }
-
-
-
