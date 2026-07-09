@@ -17,11 +17,13 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 import com.codingpet.viewer.databinding.ActivityMainBinding
+import com.codingpet.viewer.update.UpdateManager
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val handler = Handler(Looper.getMainLooper())
+    private val updateMgr by lazy { UpdateManager.get(this) }
 
     // 上一次用户交互时间，用作平时缓慢变暗的起算点。
     private var lastInteractionMs: Long = SystemClock.uptimeMillis()
@@ -69,9 +71,21 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnReload.setOnClickListener { loadUrl() }
         binding.dimOverlay.setOnClickListener {
-            // 触摸黑屏遮罩：点亮，重置衰减
+            // 触摸黑屏遮罩:点亮,重置衰减
             noteUserInteraction()
         }
+
+        // Android 13+ 通知权限(非阻塞,拒绝时仅静默不弹通知,不影响 App 使用)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val granted = checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+            }
+        }
+
+        // 启动自动更新周期检查(内部会读 Prefs 判断开关);检查跑在后台,不阻塞 UI。
+        updateMgr.startAuto()
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -209,6 +223,8 @@ class MainActivity : AppCompatActivity() {
         if (current == null || !current.startsWith(target)) {
             loadUrl()
         }
+        // 若后台已发现新版本,前台可见时弹一次对话框
+        updateMgr.promptIfNeeded(this)
     }
 
     override fun onPause() {

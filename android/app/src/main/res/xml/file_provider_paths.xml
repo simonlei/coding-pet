@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 对应 getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) 下的 update/ 目录 -->
+    <external-files-path name="updates" path="Download/update/" />
+    <external-files-path name="downloads_root" path="Download/" />
+</paths>

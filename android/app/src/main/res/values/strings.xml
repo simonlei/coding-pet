@@ -14,4 +14,31 @@
     <string name="settings_fade_hint">触摸屏幕后经过多少秒降到最低亮度（5~3600）</string>
     <string name="settings_hint">应用会在黑屏时段显示黑色遮罩并降低亮度；在其他时段，从上次触摸起亮度会缓慢降到「最低亮度」以防 OLED 烧屏。dashboard 有等待审批/输入的会话时会立即恢复全亮。</string>
     <string name="reload">刷新</string>
+
+    <!-- ===== 自动更新 ===== -->
+    <string name="update_channel_name">应用更新</string>
+    <string name="update_channel_desc">发现新版本时通知</string>
+    <string name="update_notif_title">发现新版本 %1$s</string>
+    <string name="update_notif_text">点击查看详情并升级</string>
+    <string name="update_dialog_title">发现新版本</string>
+    <string name="update_dialog_message">最新版本: %1$s\n当前版本: %2$s\n\n是否下载并升级?</string>
+    <string name="update_download">下载</string>
+    <string name="update_later">稍后</string>
+    <string name="update_skip">跳过此版本</string>
+    <string name="update_downloading_title">正在下载 APK</string>
+    <string name="update_downloading_msg">%1$s   %2$d%%</string>
+    <string name="update_ready_title">下载完成</string>
+    <string name="update_ready_msg">%1$s 已下载完毕,是否立即安装?</string>
+    <string name="update_install_now">立即安装</string>
+    <string name="update_download_failed_title">下载失败</string>
+    <string name="update_unknown_source_title">需要授权</string>
+    <string name="update_unknown_source_msg">已跳转到系统设置,请允许本应用安装未知来源应用后,返回并再次点击"立即安装"。</string>
+    <string name="update_settings_auto">自动检查更新</string>
+    <string name="update_settings_current">当前版本</string>
+    <string name="update_settings_check">检查更新</string>
+    <string name="update_settings_checking">正在检查…</string>
+    <string name="update_settings_up_to_date">已是最新版本 (%1$s)</string>
+    <string name="update_settings_failed">检查失败: %1$s</string>
+    <string name="update_settings_never_checked">尚未检查</string>
+    <string name="update_settings_last_check">上次检查: %1$s</string>
 </resources>

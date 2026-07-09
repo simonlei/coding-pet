@@ -3,7 +3,9 @@ package com.codingpet.viewer
 import android.app.TimePickerDialog
 import android.os.Bundle
 import android.text.InputType
+import android.text.format.DateUtils
 import android.widget.EditText
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
@@ -11,10 +13,12 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import com.codingpet.viewer.databinding.ActivitySettingsBinding
+import com.codingpet.viewer.update.UpdateManager
 
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
+    private val updateMgr by lazy { UpdateManager.get(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,6 +45,12 @@ class SettingsActivity : AppCompatActivity() {
         binding.rowBrightness.setOnClickListener { editBrightness() }
         binding.rowLowBrightness.setOnClickListener { editLowBrightness() }
         binding.rowFade.setOnClickListener { editFadeSeconds() }
+
+        binding.switchAutoUpdate.setOnCheckedChangeListener { _, checked ->
+            Prefs.get(this).edit { putBoolean(Prefs.KEY_UPDATE_AUTO, checked) }
+            if (checked) updateMgr.startAuto() else updateMgr.stopAuto()
+        }
+        binding.rowCheckUpdate.setOnClickListener { triggerManualCheck() }
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -55,6 +65,38 @@ class SettingsActivity : AppCompatActivity() {
         binding.txtBrightness.text = "${Prefs.dimBrightness(this)}%"
         binding.txtLowBrightness.text = "${Prefs.lowBrightness(this)}%"
         binding.txtFade.text = "${Prefs.fadeSeconds(this)}s"
+
+        binding.switchAutoUpdate.isChecked = Prefs.updateAutoCheck(this)
+        binding.txtVersion.text = "v${updateMgr.currentVersion()}"
+        val lastMs = Prefs.updateLastCheckMs(this)
+        binding.txtUpdateStatus.text = if (lastMs <= 0L) {
+            getString(R.string.update_settings_never_checked)
+        } else {
+            val rel = DateUtils.getRelativeTimeSpanString(
+                lastMs, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS
+            ).toString()
+            getString(R.string.update_settings_last_check, rel)
+        }
+    }
+
+    private fun triggerManualCheck() {
+        binding.txtUpdateStatus.text = getString(R.string.update_settings_checking)
+        updateMgr.manualCheck(this) { r ->
+            refresh()
+            when {
+                !r.ok -> Toast.makeText(
+                    this,
+                    getString(R.string.update_settings_failed, r.error ?: "unknown"),
+                    Toast.LENGTH_LONG
+                ).show()
+                !r.hasUpdate -> Toast.makeText(
+                    this,
+                    getString(R.string.update_settings_up_to_date, r.latestTag ?: "?"),
+                    Toast.LENGTH_SHORT
+                ).show()
+                // hasUpdate 时 manualCheck 内部已弹对话框,这里无需再提示
+            }
+        }
     }
 
     private fun editUrl() {

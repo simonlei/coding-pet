@@ -14,6 +14,29 @@ val hasReleaseSigning = !ksPath.isNullOrBlank() && !ksPassword.isNullOrBlank()
         && !keyAlias.isNullOrBlank() && !keyPassword.isNullOrBlank()
         && file(ksPath!!).exists()
 
+// 版本号解析:与 Go 端 ldflags 注入保持一致的思路
+// CI: GITHUB_REF_NAME=vX.Y.Z(tag 触发) 或 分支名/dev-<sha>(非 tag)
+// 本地: 无 GITHUB_REF_NAME,回退 "0.1.1"
+// versionName 存 "X.Y.Z"(不带 v);非 semver(如 dev-abc)时置为 "0.0.0" 便于自更新识别为需升级
+val rawRef: String = (System.getenv("GITHUB_REF_NAME") ?: "0.1.1").trim()
+val semverRegex = Regex("^v?(\\d+)\\.(\\d+)\\.(\\d+)(?:[-+].*)?$")
+val semverMatch = semverRegex.matchEntire(rawRef)
+val appVersionName: String = if (semverMatch != null) {
+    val (maj, min, pat) = semverMatch.destructured
+    "$maj.$min.$pat"
+} else {
+    // 非 semver(如 dev-abc123 / master / feature-x):写 0.0.0 便于更新逻辑视为最旧版本
+    "0.0.0"
+}
+val appVersionCode: Int = if (semverMatch != null) {
+    val (maj, min, pat) = semverMatch.destructured
+    maj.toInt() * 10000 + min.toInt() * 100 + pat.toInt()
+} else {
+    1
+}
+// 便于自更新时保留原始 tag 字符串(rawRef 可能是 v0.1.1 或 dev-abc)
+val appBuildRef: String = rawRef
+
 android {
     namespace = "com.codingpet.viewer"
     compileSdk = 34
@@ -22,8 +45,10 @@ android {
         applicationId = "com.codingpet.viewer"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
+        // 供 UpdateChecker 读取原始构建引用(如 "v0.1.1" 或 "dev-abcdef")
+        buildConfigField("String", "BUILD_REF", "\"${appBuildRef}\"")
     }
 
     if (hasReleaseSigning) {
@@ -56,6 +81,7 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 
@@ -65,4 +91,6 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.preference:preference-ktx:1.2.1")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }
+
