@@ -6,13 +6,13 @@ plugins {
 }
 
 // 从环境变量读取签名配置(供 CI 使用)
-val ksPath: String? = System.getenv("ANDROID_KEYSTORE_PATH")
-val ksPassword: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-val keyAlias: String? = System.getenv("ANDROID_KEY_ALIAS")
-val keyPassword: String? = System.getenv("ANDROID_KEY_PASSWORD")
-val hasReleaseSigning = !ksPath.isNullOrBlank() && !ksPassword.isNullOrBlank()
-        && !keyAlias.isNullOrBlank() && !keyPassword.isNullOrBlank()
-        && file(ksPath!!).exists()
+val ksPath: String = System.getenv("ANDROID_KEYSTORE_PATH").orEmpty()
+val ksPassword: String = System.getenv("ANDROID_KEYSTORE_PASSWORD").orEmpty()
+val ksKeyAlias: String = System.getenv("ANDROID_KEY_ALIAS").orEmpty()
+val ksKeyPassword: String = System.getenv("ANDROID_KEY_PASSWORD").orEmpty()
+val hasReleaseSigning = ksPath.isNotBlank() && ksPassword.isNotBlank()
+        && ksKeyAlias.isNotBlank() && ksKeyPassword.isNotBlank()
+        && file(ksPath).exists()
 
 // 版本号解析:与 Go 端 ldflags 注入保持一致的思路
 // CI: GITHUB_REF_NAME=android-vX.Y.Z(tag 触发) 或 分支名/dev-<sha>(非 tag)
@@ -56,10 +56,10 @@ android {
     if (hasReleaseSigning) {
         signingConfigs {
             create("release") {
-                storeFile = file(ksPath!!)
+                storeFile = file(ksPath)
                 storePassword = ksPassword
-                this.keyAlias = keyAlias
-                this.keyPassword = keyPassword
+                keyAlias = ksKeyAlias
+                keyPassword = ksKeyPassword
             }
         }
     }
@@ -95,5 +95,6 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }
+
 
 
