@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/simonlei/coding-pet-dashboard/internal/applog"
 	"github.com/simonlei/coding-pet-dashboard/internal/collector"
+	"github.com/simonlei/coding-pet-dashboard/internal/notifier"
 	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 	"github.com/simonlei/coding-pet-dashboard/internal/selfupdate"
 )
@@ -21,6 +23,12 @@ import (
 var version = "dev"
 
 func main() {
+	// 子命令分派：agent add/list/remove target ...
+	// 匹配后子命令自行 exit，不返回。
+	if code, matched := runSubcommand(os.Args[1:]); matched {
+		os.Exit(code)
+	}
+
 	// flag 解析（环境变量作为默认值）
 	serverURL := flag.String("server", envOr("DASHBOARD_SERVER", ""), "Dashboard server URL (e.g. http://192.168.1.100:3000)")
 	token := flag.String("token", envOr("DASHBOARD_TOKEN", ""), "Auth token (optional)")
@@ -69,6 +77,18 @@ func main() {
 	log.Printf("Starting coding-pet-agent %s, machine_id=%s, server=%s, interval=%s",
 		version, actualMachineID, *serverURL, *interval)
 
+	// notifier：加载 targets 并启动 watch。任何错误只打日志，绝不影响主循环。
+	store := notifier.NewFileTargetStore("")
+	if err := store.Load(); err != nil {
+		log.Printf("notifier: load %s: %v (continuing with empty target list)", store.Path(), err)
+	}
+	nt := notifier.NewNotifier(actualHostname, store)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store.StartWatch(ctx, 10*time.Second)
+	log.Printf("notifier: %d targets loaded from %s (%s)",
+		len(store.List()), store.Path(), notifier.SummarizeKinds(store.List()))
+
 	// 自动更新（默认开启，agent 无端口，BeforeRestart=nil）
 	if *autoUpdate {
 		selfupdate.StartAuto(selfupdate.Options{
@@ -81,25 +101,32 @@ func main() {
 
 	c := collector.New()
 
-	// 定时采集 + fire-and-forget 上报
+	// 定时采集 + fire-and-forget 上报 & 推送
 	ticker := time.NewTicker(*interval)
 	defer ticker.Stop()
 
-	// 启动时立即上报一次
-	report(c, *serverURL, *token, actualMachineID, actualHostname)
+	// 启动时立即处理一轮
+	tick(c, nt, *serverURL, *token, actualMachineID, actualHostname)
 
 	for range ticker.C {
-		// fire-and-forget：不阻塞下一轮采集
-		go report(c, *serverURL, *token, actualMachineID, actualHostname)
+		tick(c, nt, *serverURL, *token, actualMachineID, actualHostname)
 	}
 }
 
-// report 采集并上报，失败只记录日志
-func report(c *collector.Collector, serverURL, token, machineID, hostname string) {
+// tick 完成一轮采集 → 上报 server + 通知 target。两条 fire-and-forget 分支
+// 共享同一份 sessions 快照，互不影响。now 在此处捕获、传给 notifier，避免
+// goroutine 调度乱序导致 Detector 里"后 tick 先到、前 tick 后到"覆盖状态。
+func tick(c *collector.Collector, nt *notifier.Notifier, serverURL, token, machineID, hostname string) {
 	sessions := c.CollectSessions()
+	now := time.Now()
+	go report(sessions, serverURL, token, machineID, hostname)
+	go nt.Reconcile(context.Background(), sessions, now)
+}
 
+// report 上报本轮 sessions；失败只记录日志。
+func report(sessions []protocol.SessionInfo, serverURL, token, machineID, hostname string) {
 	// 过滤已终止的 session，只上报活跃 session
-	var activeSessions []protocol.SessionInfo
+	activeSessions := make([]protocol.SessionInfo, 0, len(sessions))
 	for _, s := range sessions {
 		if s.State != protocol.StateTerminated {
 			activeSessions = append(activeSessions, s)
@@ -142,8 +169,6 @@ func report(c *collector.Collector, serverURL, token, machineID, hostname string
 		log.Printf("report failed: HTTP %d", resp.StatusCode)
 		return
 	}
-
-	fmt.Printf(".")
 }
 
 // envOr 读取环境变量，不存在时返回默认值

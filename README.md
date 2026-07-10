@@ -105,6 +105,28 @@ export DASHBOARD_ID=my-machine
 
 运行参数可通过环境变量覆盖（`SERVER_PORT` / `SERVER_TOKEN` / `AGENT_SERVER` / `AGENT_TOKEN` / `AGENT_ID` / `AGENT_INTERVAL` 等），日志写入 `logs/`。
 
+### 企业微信推送（可选）
+
+除了上报中心 server，Agent 还可以在本机 session 从 `active` 跃迁到 `waiting_for_input` / `waiting_for_approval` / `terminated` 时，直接把消息推给企业微信群机器人（或未来的其他 webhook）。仅在稳定持续 5 秒后才推送，避免瞬时抖动。
+
+配置文件位置：`~/.coding-pet/targets.json`（可用 `CODING_PET_TARGETS_PATH` 环境变量覆盖）。
+
+```bash
+# 加一个企微机器人 webhook
+./coding-pet-agent add target 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR-KEY'
+
+# 查看当前 target 列表（URL 中的 key 会被脱敏）
+./coding-pet-agent list targets
+
+# 按序号或完整 URL 删除
+./coding-pet-agent remove target 1
+./coding-pet-agent remove target 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR-KEY'
+```
+
+- 消息内容格式：`{机器名} / {工具} {CWD} / {新状态}`，例：`dev-01 / claude_code ~/work/coding-pet / waiting_for_input`。
+- Agent 常驻进程每 10 秒重读一次配置文件，`add/remove` 后无需重启。
+- 未来若需要钉钉 / Lark / Slack / 自定义 webhook，`targets.json` 里的 `kind` 字段已经预留（当前仅实现 `wechat_work`）。
+
 ### 3. 手机访问仪表盘
 
 在手机浏览器打开：
