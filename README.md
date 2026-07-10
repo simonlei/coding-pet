@@ -1,5 +1,8 @@
 # Coding Pet Dashboard
 
+[![Agent / Server](https://img.shields.io/github/v/release/simonlei/coding-pet?filter=v[0-9]*&label=agent%20%2F%20server&color=blue)](https://github.com/simonlei/coding-pet/releases?q=tag%3Av&expanded=true)
+[![Android](https://img.shields.io/github/v/release/simonlei/coding-pet?filter=android-v*&label=android&color=green)](https://github.com/simonlei/coding-pet/releases?q=tag%3Aandroid-v&expanded=true)
+
 监控多台开发机上运行的 **CodeBuddy**（CLI / IDE）、**WorkBuddy** 与 **Claude Code** 的 session 状态，在手机浏览器上集中查看。当某个 session 等待你输入（权限审批、计划确认、提问等）时，仪表盘会高亮闪烁提醒，避免 agent 在那里干等。
 
 ## 功能
