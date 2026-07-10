@@ -49,8 +49,8 @@ func setupFakeGitHub(t *testing.T, tag, agentContent, serverContent string) (*ht
 			{Name: shaSumsAsset, DownloadURL: srv.URL + "/dl/sha"},
 		},
 	}
-	mux.HandleFunc(fmt.Sprintf("/repos/%s/releases/latest", repoSlug), func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(rel)
+	mux.HandleFunc(fmt.Sprintf("/repos/%s/releases", repoSlug), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]Release{*rel})
 	})
 	return srv, &Client{APIBase: srv.URL, HTTP: srv.Client()}, rel
 }

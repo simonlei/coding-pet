@@ -37,10 +37,12 @@ type Asset struct {
 	DownloadURL string `json:"browser_download_url"`
 }
 
-// Release 对应 GitHub /releases/latest 的响应（仅取用到的字段）。
+// Release 对应 GitHub release 的响应（仅取用到的字段）。
 type Release struct {
-	TagName string  `json:"tag_name"`
-	Assets  []Asset `json:"assets"`
+	TagName    string  `json:"tag_name"`
+	Assets     []Asset `json:"assets"`
+	Prerelease bool    `json:"prerelease"`
+	Draft      bool    `json:"draft"`
 }
 
 // Client 封装对 GitHub release 的查询与下载，APIBase/HTTP 可注入以便测试。
@@ -69,9 +71,16 @@ func (c *Client) applyAuth(req *http.Request) {
 	}
 }
 
-// FetchLatest 拉取最新正式版 release（GitHub 自动跳过 prerelease/draft）。
+// FetchLatest 拉取仓库最新的服务端/agent 正式 release。
+//
+// 不能用 /releases/latest：该端点只返回全局最新一条 release，
+// 而本仓库同时发布 android-v* 和 v* 两组 tag。安卓发版会把服务端 release 挤掉，
+// 导致本函数拿到 android-vX.Y.Z 并在 semver 解析时报错。
+//
+// 改为拉 /releases 列表（默认按发布时间倒序），跳过 draft/prerelease，
+// 选出第一条 tag 能解析为 vX.Y.Z 的 release（android-v* 因不是 semver 会被过滤）。
 func (c *Client) FetchLatest() (*Release, error) {
-	url := fmt.Sprintf("%s/repos/%s/releases/latest", strings.TrimRight(c.APIBase, "/"), repoSlug)
+	url := fmt.Sprintf("%s/repos/%s/releases?per_page=30", strings.TrimRight(c.APIBase, "/"), repoSlug)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -82,26 +91,37 @@ func (c *Client) FetchLatest() (*Release, error) {
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch latest release: %w", err)
+		return nil, fmt.Errorf("fetch releases: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch latest release: %s", describeGitHubError(resp))
+		return nil, fmt.Errorf("fetch releases: %s", describeGitHubError(resp))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read release body: %w", err)
+		return nil, fmt.Errorf("read releases body: %w", err)
 	}
-	var rel Release
-	if err := json.Unmarshal(body, &rel); err != nil {
-		return nil, fmt.Errorf("parse release json: %w", err)
+	var releases []Release
+	if err := json.Unmarshal(body, &releases); err != nil {
+		return nil, fmt.Errorf("parse releases json: %w", err)
 	}
-	if rel.TagName == "" {
-		return nil, fmt.Errorf("release has empty tag_name")
+	for i := range releases {
+		rel := &releases[i]
+		if rel.Draft || rel.Prerelease {
+			continue
+		}
+		if rel.TagName == "" {
+			continue
+		}
+		if _, _, err := parseSemver(rel.TagName); err != nil {
+			// 非 semver 的 tag（如 android-v0.1.26）不属于服务端/agent 发布，跳过
+			continue
+		}
+		return rel, nil
 	}
-	return &rel, nil
+	return nil, fmt.Errorf("no matching semver release found in %d entries", len(releases))
 }
 
 // archiveExt 返回当前平台的归档扩展名。
