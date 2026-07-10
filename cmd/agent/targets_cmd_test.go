@@ -184,13 +184,26 @@ func TestRunSubcommand_Dispatch(t *testing.T) {
 	if _, matched := runSubcommand([]string{"--server", "http://x"}); matched {
 		t.Error("flag-style args should not match subcommand")
 	}
-	if _, matched := runSubcommand([]string{"add"}); matched {
-		t.Error("bare 'add' should not match")
+	// bare 'add' 现在被 subcommand 层拦截并提示 usage（不 fall-through）
+	if code, matched := runSubcommand([]string{"add"}); !matched || code != 2 {
+		t.Errorf("bare 'add' should be caught with usage; matched=%v code=%d", matched, code)
 	}
 	if _, matched := runSubcommand([]string{"list", "targets"}); !matched {
 		t.Error("list targets should match")
 	}
 	if _, matched := runSubcommand([]string{"remove", "target", "1"}); !matched {
 		t.Error("remove target should match")
+	}
+	// 词序错误 'agent target list' 也被拦截
+	if code, matched := runSubcommand([]string{"target", "list"}); !matched || code != 2 {
+		t.Errorf("target list should be caught with usage; matched=%v code=%d", matched, code)
+	}
+	// 未知词序 'agent add xyz'
+	if code, matched := runSubcommand([]string{"add", "xyz"}); !matched || code != 2 {
+		t.Errorf("add xyz should be caught; matched=%v code=%d", matched, code)
+	}
+	// 完全无关的 verb 仍应 fall-through 给 daemon
+	if _, matched := runSubcommand([]string{"help"}); matched {
+		t.Error("'help' as top-level should fall through to daemon (or be caught by flag.Usage on -h)")
 	}
 }

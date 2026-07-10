@@ -38,6 +38,27 @@ func main() {
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	selfUpdate := flag.Bool("self-update", false, "Check GitHub for a newer release and update if available, then exit")
 	autoUpdate := flag.Bool("auto-update", envAutoUpdate(), "Enable periodic auto-update (env: CODING_PET_AUTO_UPDATE=false to disable)")
+
+	// 默认 usage 只列 flag，缺 target 子命令说明；覆盖之。
+	flag.Usage = func() {
+		out := flag.CommandLine.Output()
+		fmt.Fprintf(out, `coding-pet-agent — 采集本机 CodeBuddy / WorkBuddy / Claude Code session 并上报中心 server；
+可选择向企业微信等 webhook 主动推送状态跃迁通知。
+
+用法：
+  %s [flags]                       常驻模式：定时采集 + 上报 + 通知
+  %s add target <url> [--kind K]   追加一个推送目标（默认 --kind wechat_work）
+  %s list targets                  列出当前所有推送目标（URL 会脱敏）
+  %s remove target <url|序号>      按完整 URL 或 list 输出的序号删除
+
+推送目标持久化到 ~/.coding-pet/targets.json，可用 CODING_PET_TARGETS_PATH 覆盖。
+常驻进程每 10 秒重读该文件感知 add/remove 变更，无需重启。
+
+Flags:
+`, os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+		flag.PrintDefaults()
+	}
+
 	flag.Parse()
 
 	if *showVersion {

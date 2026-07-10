@@ -19,11 +19,30 @@ import (
 //	agent add target <url> [--kind wechat_work]
 //	agent list targets
 //	agent remove target <url-or-1-based-index>
+//
+// 常见词序错误（`agent target list`、`agent add`、`agent list`、`agent remove`）
+// 会在这里被拦截并给出友好提示，避免走到 daemon 分支被 --server 报错误导。
 func runSubcommand(args []string) (int, bool) {
-	if len(args) < 2 {
+	if len(args) == 0 {
 		return 0, false
 	}
-	verb, noun := args[0], args[1]
+	// `agent target ...`：常见词序错，明示正确形态。
+	if args[0] == "target" || args[0] == "targets" {
+		fmt.Fprintln(os.Stderr, "usage: agent {add target <url> | list targets | remove target <url|index>}")
+		return 2, true
+	}
+	verb := args[0]
+	// 只有 add/list/remove 才可能是子命令；其他情况让 daemon 处理。
+	switch verb {
+	case "add", "list", "remove":
+	default:
+		return 0, false
+	}
+	if len(args) < 2 {
+		fmt.Fprintf(os.Stderr, "usage: agent %s %s\n", verb, subcmdUsageSuffix(verb))
+		return 2, true
+	}
+	noun := args[1]
 	switch {
 	case verb == "add" && noun == "target":
 		return runAddTarget(args[2:]), true
@@ -32,7 +51,26 @@ func runSubcommand(args []string) (int, bool) {
 	case verb == "remove" && noun == "target":
 		return runRemoveTarget(args[2:]), true
 	}
-	return 0, false
+	fmt.Fprintf(os.Stderr, "unknown subcommand: agent %s %s\nusage: agent %s %s\n", verb, noun, verb, subcmdUsageSuffix(verb))
+	return 2, true
+}
+
+// subcmdUsageSuffix 给出 verb 之后的正确参数形态。
+func subcmdUsageSuffix(verb string) string {
+	switch verb {
+	case "add":
+		return "target <url> [--kind wechat_work]"
+	case "list":
+		return "targets"
+	case "remove":
+		return "target <url-or-index>"
+	}
+	return ""
+}
+
+// isHelpFlag 判断一个 arg 是不是常见的 help flag。
+func isHelpFlag(a string) bool {
+	return a == "-h" || a == "--help" || a == "help"
 }
 
 // storeForCLI 构造一个 fileTargetStore 用于子命令。默认走
@@ -104,6 +142,9 @@ func runListTargets(args []string) int {
 func runListTargetsWith(w *fileTargetStoreWrapper, args []string) int {
 	if len(args) > 0 {
 		fmt.Fprintln(w.errw, "usage: agent list targets")
+		if isHelpFlag(args[0]) {
+			return 0
+		}
 		return 2
 	}
 	if err := w.store.Load(); err != nil {
@@ -122,9 +163,12 @@ func runRemoveTarget(args []string) int {
 }
 
 func runRemoveTargetWith(w *fileTargetStoreWrapper, args []string) int {
-	if len(args) < 1 {
+	if len(args) < 1 || isHelpFlag(args[0]) {
 		fmt.Fprintln(w.errw, "usage: agent remove target <url-or-index>")
-		return 2
+		if len(args) < 1 {
+			return 2
+		}
+		return 0
 	}
 	key := args[0]
 	if err := w.store.Remove(key); err != nil {
