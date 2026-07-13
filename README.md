@@ -14,6 +14,7 @@
 - **多机器汇总**：各开发机运行 Agent，上报到中心 Server；机器列表按「等待优先 > 在线优先 > MachineID」稳定排序。
 - **离线检测**：90 秒无上报标记为离线，离线机器的 session 状态显示为 `unknown`（避免显示过期的「等待输入」）；离线超过 24 小时后从内存清理。
 - **自动更新**：Agent 与 Server 默认开启后台自更新，每 30 分钟（带抖动）向 GitHub Release 查询新版本，检测到更新即下载对应平台产物并原地替换重启；也支持 `--self-update` 手动触发一次。可用 `--auto-update=false` 或 `CODING_PET_AUTO_UPDATE=false` 关闭，配置 `GITHUB_TOKEN` 可将匿名 60/hr 的调用限额提升至 5000/hr。
+- **多 target webhook 推送**：Agent 除了上报中心 server 之外，可配置任意数量的 webhook target（当前实现企业微信群机器人，`kind` 字段已为钉钉 / Lark / Slack / 自定义 webhook 预留）。session 状态从 `active` 稳定跃迁到 `waiting_for_input` / `waiting_for_approval` / `terminated` 时并行推送到全部 target，单个 target 失败不影响其他；通过 `add target` / `list targets` / `remove target` 三件套子命令管理，Agent 每 10 秒热重载配置无需重启。
 - **安卓客户端 + 伪熄屏**：随仓库提供 [Android WebView 客户端](android/README.md)，全屏显示仪表盘并 `FLAG_KEEP_SCREEN_ON` 保持常亮；可配置「伪黑屏时段」（默认 18:00 → 次日 09:00），进入时段后叠加黑色遮罩 + 亮度缓慢衰减到最低，页面仍在后台实时刷新；出现「等待输入/等待审批」提醒时自动回到全亮以引起注意，触摸屏幕可临时唤醒 10 秒。
 
 ## 架构
@@ -108,27 +109,32 @@ export DASHBOARD_ID=my-machine
 
 运行参数可通过环境变量覆盖（`SERVER_PORT` / `SERVER_TOKEN` / `AGENT_SERVER` / `AGENT_TOKEN` / `AGENT_ID` / `AGENT_INTERVAL` 等），日志写入 `logs/`。
 
-### 企业微信推送（可选）
+### Webhook 推送（可选，支持多 target）
 
-除了上报中心 server，Agent 还可以在本机 session 从 `active` 跃迁到 `waiting_for_input` / `waiting_for_approval` / `terminated` 时，直接把消息推给企业微信群机器人（或未来的其他 webhook）。仅在稳定持续 5 秒后才推送，避免瞬时抖动。
+除了上报中心 server，Agent 还可以在本机 session 从 `active` 跃迁到 `waiting_for_input` / `waiting_for_approval` / `terminated` 时，直接把消息推给一个或多个 webhook。仅在稳定持续 5 秒后才推送，避免瞬时抖动。
+
+- **多 target 并行**：`targets.json` 里配置的所有 target 会并行收到同一条消息，单个 target 失败（网络错误 / 非 2xx）不影响其他 target。
+- **热重载**：Agent 常驻进程每 10 秒重读一次配置文件，`add` / `remove` 后无需重启 daemon。
+- **kind 字段**：当前实现 `wechat_work`（企业微信群机器人），未来若需要钉钉 / Lark / Slack / 自定义 webhook 无需改协议，只需新增 dispatcher。
 
 配置文件位置：`~/.coding-pet/targets.json`（可用 `CODING_PET_TARGETS_PATH` 环境变量覆盖）。
 
 ```bash
-# 加一个企微机器人 webhook
-./coding-pet-agent add target 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR-KEY'
+# 新增一个企微机器人 webhook（可重复执行加多个，同 URL 幂等）
+./coding-pet-agent add target 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR-KEY-1'
+./coding-pet-agent add target 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR-KEY-2'
+# 显式指定 kind（默认 wechat_work）
+./coding-pet-agent add target 'https://example.com/hook' --kind wechat_work
 
-# 查看当前 target 列表（URL 中的 key 会被脱敏）
+# 查看当前 target 列表（URL 中的 key 会被脱敏，序号从 1 开始）
 ./coding-pet-agent list targets
 
-# 按序号或完整 URL 删除
+# 删除：按 list 输出的序号，或按完整 URL
 ./coding-pet-agent remove target 1
-./coding-pet-agent remove target 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR-KEY'
+./coding-pet-agent remove target 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR-KEY-2'
 ```
 
-- 消息内容格式：`{机器名} / {工具} {CWD} / {新状态}`，例：`dev-01 / claude_code ~/work/coding-pet / waiting_for_input`。
-- Agent 常驻进程每 10 秒重读一次配置文件，`add/remove` 后无需重启。
-- 未来若需要钉钉 / Lark / Slack / 自定义 webhook，`targets.json` 里的 `kind` 字段已经预留（当前仅实现 `wechat_work`）。
+消息内容格式：`{机器名} / {工具} {CWD} / {新状态}`，例：`dev-01 / claude_code ~/work/coding-pet / waiting_for_input`。
 
 ### 3. 手机访问仪表盘
 
@@ -164,6 +170,16 @@ http://<中心服务器IP>:3000
 | `--auto-update` | true | 后台每 30 分钟（带抖动）自动检查更新，可用 `CODING_PET_AUTO_UPDATE=false` 关闭 |
 
 > **自动更新**：Server 在升级前会先关掉监听释放端口再替换二进制；Agent 直接原地替换。默认匿名访问 GitHub API（60 次/小时），可通过环境变量 `GITHUB_TOKEN` 提升到 5000 次/小时。
+
+### coding-pet-agent 子命令（webhook target 管理）
+
+| 命令 | 说明 |
+|------|------|
+| `agent add target <url> [--kind wechat_work]` | 追加一个 webhook target 到 `~/.coding-pet/targets.json`；同 URL 幂等 |
+| `agent list targets` | 打印当前 target 列表（URL 中的 key 会被脱敏）与配置文件路径 |
+| `agent remove target <url-or-index>` | 按 `list` 输出的序号（从 1 开始）或完整 URL 删除 |
+
+具体触发条件、消息格式与热重载行为见上方 [Webhook 推送](#webhook-推送可选支持多-target)。
 
 ## API
 
