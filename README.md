@@ -1,7 +1,7 @@
 # Coding Pet Dashboard
 
-[![Agent / Server](https://img.shields.io/github/v/release/simonlei/coding-pet?filter=v[0-9]*&label=agent%20%2F%20server&color=blue)](https://github.com/simonlei/coding-pet/releases?q=tag%3Av&expanded=true)
-[![Android](https://img.shields.io/github/v/release/simonlei/coding-pet?filter=android-v*&label=android&color=green)](https://github.com/simonlei/coding-pet/releases?q=tag%3Aandroid-v&expanded=true)
+[![Agent / Server](https://img.shields.io/github/v/release/simonlei/coding-pet-dashboard?filter=v[0-9]*&label=agent%20%2F%20server&color=blue)](https://github.com/simonlei/coding-pet-dashboard/releases?q=tag%3Av&expanded=true)
+[![Android](https://img.shields.io/github/v/release/simonlei/coding-pet-dashboard?filter=android-v*&label=android&color=green)](https://github.com/simonlei/coding-pet-dashboard/releases?q=tag%3Aandroid-v&expanded=true)
 
 监控多台开发机上运行的 **CodeBuddy**（CLI / IDE）、**WorkBuddy** 与 **Claude Code** 的 session 状态，在手机浏览器上集中查看。当某个 session 等待你输入（权限审批、计划确认、提问等）时，仪表盘会高亮闪烁提醒，避免 agent 在那里干等。
 
@@ -190,9 +190,38 @@ internal/
                 codebuddy_ide.go    CodeBuddy IDE：扫 history 目录
                 workbuddy_db.go     WorkBuddy 桌面版：只读 SQLite sessions 表
                 claudecode.go       Claude Code：PID 文件 + status 字段
+  notifier/     企业微信等 webhook 推送（target 管理 + 状态跃迁检测 + 脱敏 + 分发）
+                target.go           推送目标定义与文件存储
+                detector.go         状态跃迁检测（active → waiting/terminated）
+                dispatcher.go       消息分发
+                notifier.go         常驻进程 + 配置热重载（每 10s 重读）
+                redact.go           URL key 脱敏
   protocol/     共享数据结构与状态/工具枚举
+  selfupdate/   GitHub Release 自动更新（查询 / 下载 / 校验 / 解压 / 原地替换 / 重启）
+                github.go           Release 拉取与资产选择
+                selfupdate.go       更新主流程（CheckAndUpdate）
+                auto.go             后台定时检查（默认 30min + 抖动）
+                archive.go         归档解压
+                version.go         版本比较
+                replace_*.go / restart_*.go  平台特定替换与重启
   server/       内存 Store、HTTP Handler、内嵌 index.html
 ```
+
+## 发布
+
+### 版本与 Tag
+
+- 版本号由 CI 通过 `-ldflags "-X main.version=..."` 注入；本地构建默认 `dev`。
+- `release.sh` 自动从现有 `vX.Y.Z` tag 中找最大版本并将 patch 号自增：
+  - `./release.sh` 只打 `vX.Y.Z`（触发 Go agent / server 构建发布）。
+  - `./release.sh --android` 同时再打 `android-vX.Y.Z`（触发 Android APK 构建发布，版本号与 `vX.Y.Z` 完全一致）。
+
+### CI 工作流
+
+- `.github/workflows/build.yml`：监听 `v*` tag / main 分支 / PR，交叉编译 `linux/darwin/windows × amd64/arm64` 的 agent 与 server，打包为 tar.gz / zip 并附 `SHA256SUMS.txt` 发布到 GitHub Release。
+- `.github/workflows/android.yml`：监听 `android-v*` tag 与 `android/**` 改动，构建 Debug / Release APK（Release 用仓库 Secrets 里的签名 keystore 签名），并附到对应 GitHub Release。
+
+> 自动更新（见上文「自动更新」）读取的正是这些 GitHub Release 产物；agent 取 tag 为 `vX.Y.Z` 的归档，Android 端取 `android-vX.Y.Z` 的 APK。
 
 ## 常见问题
 
