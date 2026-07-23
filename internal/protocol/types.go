@@ -24,10 +24,11 @@ const (
 type SessionTool string
 
 const (
-	ToolCodeBuddy    SessionTool = "codebuddy"     // CodeBuddy CLI（agent home ~/.codebuddy）
-	ToolWorkBuddy    SessionTool = "workbuddy"     // WorkBuddy 桌面版（读 ~/.workbuddy/workbuddy.db）
-	ToolClaudeCode   SessionTool = "claude_code"   // Claude Code CLI
-	ToolCodeBuddyIDE SessionTool = "codebuddy_ide" // CodeBuddy IDE（扫 CodeBuddyExtension 的 history 目录）
+	ToolCodeBuddy          SessionTool = "codebuddy"            // CodeBuddy CLI（agent home ~/.codebuddy）
+	ToolWorkBuddy          SessionTool = "workbuddy"            // WorkBuddy 桌面版（读 ~/.workbuddy/workbuddy.db）
+	ToolClaudeCode         SessionTool = "claude_code"          // Claude Code CLI
+	ToolCodeBuddyIDE       SessionTool = "codebuddy_ide"        // CodeBuddy IDE 桌面版（扫 CodeBuddyExtension 的 history 目录）
+	ToolCodeBuddyIDERemote SessionTool = "codebuddy_ide_remote" // CodeBuddy IDE 远程（VS Code Remote 连 Linux 服务器，扫 codebuddy-server-cn 的扩展 log）
 )
 
 // SessionInfo 单个 CodeBuddy session 的状态
