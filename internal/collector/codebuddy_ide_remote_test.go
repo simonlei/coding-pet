@@ -149,7 +149,8 @@ func TestExtractHex32Tokens(t *testing.T) {
 	}
 }
 
-// TestScanLogTail 单次扫描：提取全局最新 run start/end 与 convLastSeen。
+// TestScanLogTail 单次扫描：识别 [BaseAgent:craft] run start/end 作为整轮边沿；
+// subagent 的 run 与 tool 层事件均忽略；conv id 单独走 lastSeen 表。
 func TestScanLogTail(t *testing.T) {
 	convA := "6b278c9a78394489a649f77ee134a142"
 	convB := "350b839fa62243139636827ee8e3000c"
@@ -157,6 +158,12 @@ func TestScanLogTail(t *testing.T) {
 		"2026-07-23 16:31:37.000 [info] createConversation: " + convA + "\n" +
 		"2026-07-23 16:32:06.113 [info] [BaseAgent:craft] run start\n" +
 		"2026-07-23 16:32:06.500 [info] [AcpAgent:" + convA + "] tool execution\n" +
+		// subagent run end：应被忽略
+		"2026-07-23 16:32:20.000 [info] [BaseAgent:code-explorer] run end\n" +
+		// tool 层：应被忽略
+		"2026-07-23 16:32:25.000 [info] [ToolManager] 执行结束: call_abc\n" +
+		"2026-07-23 16:32:25.000 [info] [ToolManager] [waitForAllToolsExecuted] All tools execution completed\n" +
+		// 主 agent 真正的 run end
 		"2026-07-23 16:32:34.301 [info] [BaseAgent:craft] run end\n" +
 		"2026-07-23 16:33:00.000 [info] [AcpMessageRouter:" + convB + "] some event\n"
 
@@ -168,7 +175,7 @@ func TestScanLogTail(t *testing.T) {
 		t.Errorf("latestRunStartMs = %d, want %d", rsMs, wantRS)
 	}
 	if reMs != wantRE {
-		t.Errorf("latestRunEndMs = %d, want %d", reMs, wantRE)
+		t.Errorf("latestRunEndMs = %d, want %d (只应认 [BaseAgent:craft] run end)", reMs, wantRE)
 	}
 	if len(seen) != 2 {
 		t.Fatalf("convLastSeen has %d entries, want 2", len(seen))
@@ -180,6 +187,47 @@ func TestScanLogTail(t *testing.T) {
 	wantBSeen := time.Date(2026, 7, 23, 16, 33, 0, 0, time.Local).UnixMilli()
 	if seen[convB] != wantBSeen {
 		t.Errorf("seen[B] = %d, want %d", seen[convB], wantBSeen)
+	}
+}
+
+// TestScanLogTail_IgnoresToolAndSubagent 明确校验:tool 层和 subagent run 不影响 run start/end。
+func TestScanLogTail_IgnoresToolAndSubagent(t *testing.T) {
+	log := "" +
+		"2026-07-24 09:15:27.225 [info] [ToolManager] 开始执行: call_00_xICpNoY - execute_command\n" +
+		"2026-07-24 09:15:32.312 [info] [ToolManager] 执行结束: call_00_xICpNoY - execute_command\n" +
+		"2026-07-24 09:15:32.312 [info] [ToolManager] [waitForAllToolsExecuted] All tools execution completed\n" +
+		"2026-07-24 09:15:34.000 [info] [BaseAgent:code-explorer] run start\n" +
+		"2026-07-24 09:15:34.500 [info] [BaseAgent:code-explorer] run end\n" +
+		"2026-07-24 09:15:39.885 [info] [ToolManager] 开始执行: call_00_8XOSkRr - write_to_file - stream\n"
+
+	rsMs, reMs, _ := scanLogTail([]byte(log))
+	if rsMs != 0 || reMs != 0 {
+		t.Errorf("start=%d end=%d, want both 0 (无 [BaseAgent:craft] run 事件)", rsMs, reMs)
+	}
+}
+
+// TestScanLogTail_SkipsChatInputDraft 用户在输入框打字时 [ConfigService] 每按一键都写一条
+// chatInputDraft,含 conv id 但 agent 完全空闲 —— convLastSeen 不应被这类行刷新。
+func TestScanLogTail_SkipsChatInputDraft(t *testing.T) {
+	conv := "6b278c9a78394489a649f77ee134a142"
+	log := "" +
+		"2026-07-24 09:30:00.000 [info] [AcpAgent:" + conv + "] real agent activity\n" +
+		"2026-07-24 09:30:05.000 [info] [BaseAgent:craft] run end\n" +
+		// 5 分钟后用户开始打字 —— 大量 chatInputDraft
+		"2026-07-24 09:35:00.000 [info] [ConfigService] update config: key=chatInputDraft:" + conv + ", value=[{\"text\":\"h\"}]\n" +
+		"2026-07-24 09:35:01.000 [info] [ConfigService] update config: key=chatInputDraft:" + conv + ", value=[{\"text\":\"he\"}]\n" +
+		"2026-07-24 09:35:02.000 [info] [ConfigService] update config: key=chatInputDraft:" + conv + ", value=[{\"text\":\"hel\"}]\n"
+
+	_, reMs, seen := scanLogTail([]byte(log))
+
+	wantEnd := time.Date(2026, 7, 24, 9, 30, 5, 0, time.Local).UnixMilli()
+	wantSeen := time.Date(2026, 7, 24, 9, 30, 0, 0, time.Local).UnixMilli()
+	if reMs != wantEnd {
+		t.Errorf("latestRunEndMs = %d, want %d", reMs, wantEnd)
+	}
+	if seen[conv] != wantSeen {
+		t.Errorf("seen[conv] = %d, want %d (chatInputDraft 应被忽略,lastSeen 停在真正的 agent 活动)",
+			seen[conv], wantSeen)
 	}
 }
 
@@ -196,46 +244,64 @@ func TestMapCodeBuddyIDERemoteState(t *testing.T) {
 		include bool
 	}{
 		{
-			name:    "关联最新 run 且 start > end,age<3min → active(正在工作)",
-			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: now - 30_000, latestRunEndMs: now - 300_000, latestRunTiedThis: true},
+			name:    "log tail 有 run start 且 > run end + tied → active(正在跑)",
+			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: now - 30_000, latestRunEndMs: now - 5*oneMin},
 			want:    protocol.StateActive,
 			include: true,
 		},
 		{
-			name:    "关联最新 run 且 start > end,age=5min(僵尸) → waiting_for_input",
-			ev:      convEventState{lastSeenMs: now - 5*oneMin, latestRunStartMs: now - 5*oneMin, latestRunEndMs: 0, latestRunTiedThis: true},
+			name:    "run end > run start + tied → waiting_for_input(一轮已完成)",
+			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: now - 2*oneMin, latestRunEndMs: now - 30_000},
 			want:    protocol.StateWaitingForInput,
 			include: true,
 		},
 		{
-			name:    "关联最新 run 且 end > start → waiting_for_input(工作已完成)",
-			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: now - 60_000, latestRunEndMs: now - 30_000, latestRunTiedThis: true},
+			name:    "只有 run end 无 run start + tied → waiting_for_input",
+			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: 0, latestRunEndMs: now - 30_000},
 			want:    protocol.StateWaitingForInput,
 			include: true,
 		},
 		{
-			name:    "log 里出现过但未关联最新 run → waiting_for_input",
-			ev:      convEventState{lastSeenMs: now - 2*oneMin, latestRunStartMs: now - 30_000, latestRunEndMs: 0, latestRunTiedThis: false},
+			name:    "run end 之后 cleanup 事件刷新 lastSeen 但仍在 60s 内 → tied → waiting_for_input",
+			ev:      convEventState{lastSeenMs: now - 10_000, latestRunStartMs: now - 60_000, latestRunEndMs: now - 60_000},
 			want:    protocol.StateWaitingForInput,
 			include: true,
 		},
 		{
-			name:    "log 里未出现,current.json 新鲜(1min) → active",
+			name:    "非归属最新 run(距离 > 60s)但 conv 自身 <3min → waiting_for_input(其他 workspace 在跑)",
+			ev:      convEventState{lastSeenMs: now - 2*oneMin, latestRunStartMs: now - 10_000, latestRunEndMs: 0},
+			want:    protocol.StateWaitingForInput,
+			include: true,
+		},
+		{
+			name:    "log tail 无 run 事件但 conv 3min 内有活动 → active(保守,run 早于 tail)",
+			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: 0, latestRunEndMs: 0},
+			want:    protocol.StateActive,
+			include: true,
+		},
+		{
+			name:    "log 未出现 + current.json 新鲜(1min) → active(新建未产生事件)",
 			ev:      convEventState{lastSeenMs: 0},
 			currMs:  now - 1*oneMin,
 			want:    protocol.StateActive,
 			include: true,
 		},
 		{
-			name:    "log 里未出现,current.json 5min 前 → waiting_for_input",
+			name:    "log 未出现 + current.json 5min 前 → waiting_for_input",
 			ev:      convEventState{lastSeenMs: 0},
 			currMs:  now - 5*oneMin,
 			want:    protocol.StateWaitingForInput,
 			include: true,
 		},
 		{
-			name:    "任意 age ≥ 30min → 剔除",
-			ev:      convEventState{lastSeenMs: now - 31*oneMin, latestRunStartMs: now - 31*oneMin, latestRunTiedThis: true},
+			name:    "3min~30min 无 log 活动 → waiting_for_input(降级,不看 run 边沿)",
+			ev:      convEventState{lastSeenMs: now - 10*oneMin, latestRunStartMs: now - 10*oneMin},
+			want:    protocol.StateWaitingForInput,
+			include: true,
+		},
+		{
+			name:    "age ≥ 30min → 剔除",
+			ev:      convEventState{lastSeenMs: now - 31*oneMin},
 			include: false,
 		},
 		{
@@ -255,6 +321,60 @@ func TestMapCodeBuddyIDERemoteState(t *testing.T) {
 				t.Errorf("state = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestCollectCodeBuddyIDERemote_OpenRunActive 复现用户观察的场景:
+// log 尾部只有 tool 层事件和 subagent run end,没有 [BaseAgent:craft] run end
+// (主 run 的 start 在 tail 之外,还没结束) → 应识别为 active。
+func TestCollectCodeBuddyIDERemote_OpenRunActive(t *testing.T) {
+	root := t.TempDir()
+	conv := "9adbf70b8c264edc8484256a49c20820"
+
+	// current.json 指针
+	genieBase := filepath.Join(root, "data", "User", "globalStorage",
+		"tencent-cloud.coding-copilot", "genie-history")
+	wsDir := filepath.Join(genieBase, "L2RhdGEvY3JodWI_") // "/data/crhub"
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, "current.json"),
+		[]byte(`{"conversationId":"`+conv+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	logDir := filepath.Join(root, "data", "logs", "20260722T151156",
+		"exthost3", "Tencent-Cloud.coding-copilot")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(logDir, chatLogBaseName)
+
+	now := time.Now()
+	fmtTs := func(off time.Duration) string {
+		return now.Add(off).Format("2006-01-02 15:04:05.000")
+	}
+	// 模拟真实场景:tail 里全是 subagent + tool 层事件,没有主 agent run end。
+	// conv id 最后一次出现在 30s 前,主 agent run 早已开始但未结束。
+	logContent := "" +
+		fmtTs(-60*time.Second) + " [info] [BaseAgent:code-explorer] run end\n" +
+		fmtTs(-45*time.Second) + " [info] [ToolManager] 开始执行: call_prev - execute_command\n" +
+		fmtTs(-40*time.Second) + " [info] [AcpAgent:" + conv + "] tool executing\n" +
+		fmtTs(-38*time.Second) + " [info] [ToolManager] 执行结束: call_prev\n" +
+		fmtTs(-38*time.Second) + " [info] [ToolManager] [waitForAllToolsExecuted] All tools execution completed\n" +
+		fmtTs(-30*time.Second) + " [info] [ChatService] onConversationUpdated: conversationId=" + conv + ", fields=lastMessageAt\n" +
+		fmtTs(-20*time.Second) + " [info] [ToolManager] 开始执行: call_new - write_to_file - stream\n"
+
+	if err := os.WriteFile(logPath, []byte(logContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions := collectCodeBuddyIDERemoteFromRoot(root, now.UnixMilli())
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1 (dump: %+v)", len(sessions), sessions)
+	}
+	if s := sessions[0]; s.State != protocol.StateActive {
+		t.Errorf("state = %q, want active (主 agent run 未结束)", s.State)
 	}
 }
 

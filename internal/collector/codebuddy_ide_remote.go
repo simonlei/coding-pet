@@ -19,14 +19,22 @@
 //
 // 关键事件模式（由观察归纳）：
 //   - "createConversation: <32hex>"                       —— 新会话
-//   - "[BaseAgent:*] run start" / "[BaseAgent:*] run end" —— 一次问答的开始/结束
+//   - "[BaseAgent:craft] run start" / "run end"           —— 主 agent 一轮问答的开始/结束
+//     （只认 craft，subagent 如 code-explorer 的 run 是嵌套在主 run 里的内部循环，忽略；
+//     tool 层的 "开始执行/执行结束/All tools execution completed" 也只是主 run 内部的
+//     tool 阶段边沿，一轮里会反复出现，不算整轮结束）
 //   - "[AcpAgent:<32hex>]" 或行内含 "<32hex>" 字符串     —— 该 conv 有活动
 //
 // 状态推断（3/30 分钟窗口延续桌面版语义）：
-//   - conv 与最新 run start/end 时间邻近（5s 内），最新 run 是 start 且窗口内     → active（正在工作）
-//   - conv 与最新 run 邻近，最新 run 是 end                                        → waiting_for_input（工作已完成）
-//   - conv 在 log 中未出现但 current.json 3min 内更新                              → active（新建，尚未产生事件）
-//   - 30 分钟内无任何写入                                                          → 不上报
+//   核心判定基于 [BaseAgent:craft] run start / run end 对：
+//     - run start > run end          → active（当前有 open run 在跑）
+//     - run end >= run start > 0     → waiting_for_input（一轮已完成；run end 之后的
+//                                       cleanupSession / Removed / destroyed 等清理事件
+//                                       都不算新活动）
+//     - log tail 里没抓到 run 事件但 conv 有活动 → active（run 早于 tail 起始且未 end，
+//                                       典型于运行时间长的 tool call 期间）
+//   活跃度判活基于 conv 最近 lastSeen（3min 内活跃 / 30min 内保留 / 超时剔除），
+//   lastSeen 忽略纯 UI 事件（[ConfigService] chatInputDraft）。
 //
 // 平台限制：仅 Linux 生效（其他平台 codebuddy-server-cn 不存在），其余平台返回 nil。
 package collector
@@ -45,17 +53,22 @@ import (
 )
 
 const (
-	// cbIDERemoteActiveWindow：conv 关联到最新 run 且 age < 3min → 视为正在工作/活跃。
+	// cbIDERemoteActiveWindow：conv 最近活动 age < 3min → 视为活跃/正在工作。
 	cbIDERemoteActiveWindow = 3 * time.Minute
 	// cbIDERemoteStaleWindow：任何会话超过此窗口无写盘 → 剔除。
 	cbIDERemoteStaleWindow = 30 * time.Minute
-	// runAssociationWindowMs：将 run start/end 与 conv_seen 关联的时间窗口。
-	// exthost 是单线程 JS，一次 run 内会持续输出该 conv 的事件，5s 足够覆盖。
-	runAssociationWindowMs = 5000
+	// runAssociationWindowMs：将最新 run start/end 归属到某个 conv 的时间窗口。
+	// exthost 是单线程 JS，run 期间会持续输出该 conv 的关联事件；run 结束后 IDE 会
+	// 写一批 cleanup 事件（也带 conv id）,持续到 60s 左右。60s 覆盖 cleanup 尾巴，
+	// 多 workspace 场景下 conv 切换粒度也远大于 60s。
+	runAssociationWindowMs = 60_000
 	// remoteLogTailBytes：从日志尾部读取的字节数。多次 run 的关键事件都在最后几十 KB 内。
 	remoteLogTailBytes = 256 * 1024
 	// chatLogBaseName：扩展写入的对话 log 文件名（含中文）。测试与实现共用同一常量。
 	chatLogBaseName = "腾讯云代码助手.log"
+	// mainAgentTag：主 agent 的 [BaseAgent:xxx] 名字。只有这个 tag 的 run start/end
+	// 才算整轮边沿；subagent（code-explorer 等）的 run 属于主 run 内部循环，忽略。
+	mainAgentTag = "[BaseAgent:craft]"
 )
 
 // cbIDERemoteCurrentIndex 对应 genie-history/<b64ws>/current.json
@@ -65,10 +78,9 @@ type cbIDERemoteCurrentIndex struct {
 
 // convEventState 单个 conv 从 log tail 提取的状态摘要
 type convEventState struct {
-	lastSeenMs        int64 // conv id 在 log 中最后出现的时间
-	latestRunStartMs  int64 // 最新一次 [BaseAgent:*] run start 时间（全局，不限该 conv）
-	latestRunEndMs    int64 // 最新一次 run end 时间
-	latestRunTiedThis bool  // true 表示最新 run 与该 conv 时间上邻近，可归属
+	lastSeenMs       int64 // conv id 在 log 中最后出现的时间（用于判活/stale，忽略纯 UI 事件）
+	latestRunStartMs int64 // 最新一次主 agent (mainAgentTag) run start 时间（全局）
+	latestRunEndMs   int64 // 最新一次主 agent run end 时间（全局）
 }
 
 // CollectCodeBuddyIDERemoteSessions 扫描本机 ~/.codebuddy-server-cn，为每个远程 workspace
@@ -98,7 +110,7 @@ func collectCodeBuddyIDERemoteFromRoot(root string, nowMs int64) []protocol.Sess
 		return nil
 	}
 
-	// 单次扫 log tail：提取全局 latestRunStart/End 以及每个 convID 的 lastSeen。
+	// 单次扫 log tail：提取全局最新 mainAgent run start/end 以及每个 convID 的 lastSeen。
 	latestRunStartMs, latestRunEndMs, convLastSeen := scanLogTail(logTail)
 
 	var out []protocol.SessionInfo
@@ -108,13 +120,6 @@ func collectCodeBuddyIDERemoteFromRoot(root string, nowMs int64) []protocol.Sess
 			lastSeenMs:       lastSeen,
 			latestRunStartMs: latestRunStartMs,
 			latestRunEndMs:   latestRunEndMs,
-		}
-		latestRun := st.latestRunStartMs
-		if st.latestRunEndMs > latestRun {
-			latestRun = st.latestRunEndMs
-		}
-		if lastSeen > 0 && latestRun > 0 && absMs(latestRun, lastSeen) <= runAssociationWindowMs {
-			st.latestRunTiedThis = true
 		}
 
 		state, include := mapCodeBuddyIDERemoteState(st, ws.currentMtimeMs, nowMs)
@@ -306,13 +311,23 @@ func readFileTail(path string, n int64) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// scanLogTail 单次线性扫描 log tail，返回全局最新 run start/end 时间以及每个 convID 的
-// 最后出现时间。convID 匹配采用 32 位 hex 字符串精确定位（CodeBuddy 的 conversationId 长度固定）。
+// scanLogTail 单次线性扫描 log tail，返回全局最新主 agent run start / run end 时间以及
+// 每个 convID 的最后出现时间。
+//
+// 只识别 mainAgentTag（"[BaseAgent:craft]"）的 run start / run end 作为整轮边沿。忽略:
+//   - subagent（code-explorer 等）的 run（主 run 内部的嵌套循环）
+//   - tool 层的 "开始执行/执行结束/All tools execution completed"（主 run 内会反复出现）
+//
+// convLastSeen 仅在"agent 活动"事件里更新，跳过纯 UI 状态更新（如 [ConfigService]
+// chatInputDraft，用户打字时每按一键都会写一条，含 conv id 但不代表 agent 在工作）。
+//
+// conversationId 用 32 位 hex 精确定位（CodeBuddy 的 conv id 长度固定）。
 func scanLogTail(data []byte) (latestRunStartMs, latestRunEndMs int64, convLastSeen map[string]int64) {
 	convLastSeen = map[string]int64{}
 	if len(data) == 0 {
 		return
 	}
+	mainNeedle := []byte(mainAgentTag)
 	for _, raw := range bytes.Split(data, []byte("\n")) {
 		if len(raw) < 24 {
 			continue
@@ -321,12 +336,22 @@ func scanLogTail(data []byte) (latestRunStartMs, latestRunEndMs int64, convLastS
 		if !ok {
 			continue
 		}
-		if bytes.Contains(raw, []byte("[BaseAgent")) {
-			if bytes.Contains(raw, []byte("] run start")) && ts > latestRunStartMs {
-				latestRunStartMs = ts
-			} else if bytes.Contains(raw, []byte("] run end")) && ts > latestRunEndMs {
-				latestRunEndMs = ts
+		if bytes.Contains(raw, mainNeedle) {
+			switch {
+			case bytes.Contains(raw, []byte("] run start")):
+				if ts > latestRunStartMs {
+					latestRunStartMs = ts
+				}
+			case bytes.Contains(raw, []byte("] run end")):
+				if ts > latestRunEndMs {
+					latestRunEndMs = ts
+				}
 			}
+		}
+		// UI-only 事件不算 agent 活动 —— 用户在输入框打字时 [ConfigService]
+		// 每按一键都会刷 chatInputDraft，含 conv id，但 agent 完全空闲。
+		if isNonAgentActivityLine(raw) {
+			continue
 		}
 		for _, id := range extractHex32Tokens(raw) {
 			if prev, ok := convLastSeen[id]; !ok || ts > prev {
@@ -335,6 +360,14 @@ func scanLogTail(data []byte) (latestRunStartMs, latestRunEndMs int64, convLastS
 		}
 	}
 	return
+}
+
+// isNonAgentActivityLine 判定一行 log 是否属于"非 agent 活动"（UI 状态、心跳等），
+// 这类行即便含 conv id 也不应用于 lastSeen 判活。
+func isNonAgentActivityLine(raw []byte) bool {
+	// [ConfigService] update config: key=chatInputDraft:<conv>, value=[...]
+	// —— IDE 输入框草稿。用户打字每按一键都写一条，会把空闲的 conv 错判成 active。
+	return bytes.Contains(raw, []byte("[ConfigService]"))
 }
 
 // parseLogLineTimestamp 解析行首 "2006-01-02 15:04:05.000 " 前缀，返回 Unix ms。
@@ -408,22 +441,21 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-func absMs(a, b int64) int64 {
-	if a > b {
-		return a - b
-	}
-	return b - a
-}
-
 // mapCodeBuddyIDERemoteState 用 (log 事件摘要 + current.json mtime + now) 推断 remote session 状态。
 //
-//   - 与最新 run 关联（latestRunTiedThis=true）：
-//     latestRunStart > latestRunEnd → active（active window 内） / waiting_for_input（超出，僵尸）
-//     否则                          → waiting_for_input（工作已完成）
-//   - 未与最新 run 关联但 log 里出现过 conv → waiting_for_input（之前完成过一轮）
-//   - log 里完全无 conv 出现，仅有 current.json：
-//     age < active window → active（新建，未产生事件）；否则 waiting_for_input
-//   - 任何情形 age ≥ stale window → 剔除（返回 false）
+// 核心思路:多 workspace 场景下同一个 log 混合多个 conv 的事件,exthost 单线程一次只有
+// 一个 conv 在活跃。"最新一次 run" 只归属给邻近有活动的那个 conv;非归属者用自身活跃度
+// 单独判定。
+//
+//   - 该 conv 的 lastSeen 距最新 run 事件 ≤ 60s → 该 conv 是最新 run 的归属者
+//     · runStart > runEnd     → active（当前有 open run）
+//     · runEnd  ≥ runStart    → waiting_for_input（run 已结束；后续 cleanup 事件也在此窗内）
+//   - 该 conv lastSeen 距最新 run 事件 > 60s → 不归属最新 run:
+//     · lastSeen 3min 内     → waiting_for_input（自己之前完成过一轮）
+//     · 3–30min              → waiting_for_input(降级)
+//     · ≥30min               → 剔除
+//   - log tail 无任何 run 事件但 conv 3min 内有活动 → active（保守,run 早于 tail 起始）
+//   - conv 未出现但 current.json 3min 内更新 → active（新建,未产生事件）
 func mapCodeBuddyIDERemoteState(ev convEventState, currentJsonMtimeMs, nowMs int64) (protocol.SessionState, bool) {
 	activeMs := cbIDERemoteActiveWindow.Milliseconds()
 	staleMs := cbIDERemoteStaleWindow.Milliseconds()
@@ -439,21 +471,44 @@ func mapCodeBuddyIDERemoteState(ev convEventState, currentJsonMtimeMs, nowMs int
 	if ageMs >= staleMs {
 		return "", false
 	}
+	if ageMs >= activeMs {
+		// 3–30min:降级为等待,不看 run 边沿。
+		return protocol.StateWaitingForInput, true
+	}
 
-	if ev.latestRunTiedThis {
+	// 3min 内有活动:
+	if ev.lastSeenMs == 0 {
+		// log tail 里该 conv 完全没出现,只有 current.json:视为新建未产生事件。
+		return protocol.StateActive, true
+	}
+
+	latestRun := ev.latestRunStartMs
+	if ev.latestRunEndMs > latestRun {
+		latestRun = ev.latestRunEndMs
+	}
+
+	// log tail 无任何 run 事件:conv 有活动就保守判 active(run 早于 tail 起始)。
+	if latestRun == 0 {
+		return protocol.StateActive, true
+	}
+
+	// 判断该 conv 是否归属最新 run:lastSeen 距最新 run 事件 ≤ 60s。
+	tied := absMs(ev.lastSeenMs, latestRun) <= runAssociationWindowMs
+	if tied {
 		if ev.latestRunStartMs > ev.latestRunEndMs {
-			if ageMs < activeMs {
-				return protocol.StateActive, true
-			}
-			// run 开始了但很久没写盘 → exthost 可能已挂或该轮被中断。
-			return protocol.StateWaitingForInput, true
+			return protocol.StateActive, true
 		}
 		return protocol.StateWaitingForInput, true
 	}
 
-	if ev.lastSeenMs == 0 && ageMs < activeMs {
-		// current.json 刚写、log 尾部还没抓到事件（比如刚 createConversation）。
-		return protocol.StateActive, true
-	}
+	// 非归属者:该 conv 自身 3min 内有活动但与最新 run 无关(自己之前跑过一轮,或多 workspace
+	// 场景下另一个 conv 正在跑),判 waiting_for_input。
 	return protocol.StateWaitingForInput, true
+}
+
+func absMs(a, b int64) int64 {
+	if a > b {
+		return a - b
+	}
+	return b - a
 }
