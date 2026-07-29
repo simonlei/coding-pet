@@ -57,10 +57,11 @@ const (
 	cbIDERemoteActiveWindow = 3 * time.Minute
 	// cbIDERemoteStaleWindow：任何会话超过此窗口无写盘 → 剔除。
 	cbIDERemoteStaleWindow = 30 * time.Minute
-	// runAssociationWindowMs：将最新 run start/end 归属到某个 conv 的时间窗口。
+	// runAssociationWindowMs：将 conv 的清理/心跳事件归属到邻近 run 边沿的时间窗口。
 	// exthost 是单线程 JS，run 期间会持续输出该 conv 的关联事件；run 结束后 IDE 会
-	// 写一批 cleanup 事件（也带 conv id）,持续到 60s 左右。60s 覆盖 cleanup 尾巴，
-	// 多 workspace 场景下 conv 切换粒度也远大于 60s。
+	// 写一批 cleanup 事件（也带 conv id），并容忍多 workspace 切换粒度。60s 窗口因此
+	// 既用于把 run 结束后的 cleanup 尾巴归属到邻近的 run 边沿，也远大于 conv 切换粒度，
+	// 切勿仅为"清理尾巴"而调小此值，否则会同时破坏跨 conv 的归属判定。
 	runAssociationWindowMs = 60_000
 	// remoteLogTailBytes：从日志尾部读取的字节数。多次 run 的关键事件都在最后几十 KB 内。
 	remoteLogTailBytes = 256 * 1024
@@ -447,7 +448,8 @@ func isAllDigits(s string) bool {
 // 一个 conv 在活跃。"最新一次 run" 只归属给邻近有活动的那个 conv;非归属者用自身活跃度
 // 单独判定。
 //
-//   - 该 conv 的 lastSeen 距最新 run 事件 ≤ 60s → 该 conv 是最新 run 的归属者
+//   - 该 conv 的 lastSeen 距最新 run 事件 ≤ 60s → 该 conv 是最新 run 的归属者（60s 窗口
+//     用于把 run 结束后的 cleanup/心跳事件归属到邻近的 run 边沿，并容忍多 workspace 切换粒度）
 //     · runStart > runEnd     → active（当前有 open run）
 //     · runEnd  ≥ runStart    → waiting_for_input（run 已结束；后续 cleanup 事件也在此窗内）
 //   - 该 conv lastSeen 距最新 run 事件 > 60s → 不归属最新 run:
