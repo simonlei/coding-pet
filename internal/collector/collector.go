@@ -40,6 +40,9 @@ func (c *Collector) CollectSessions() []protocol.SessionInfo {
 	// 3. CodeBuddy IDE sessions（扫描 CodeBuddyExtension 的 history 目录，见 codebuddy_ide.go）
 	sessions = append(sessions, CollectCodeBuddyIDESessions()...)
 
+	// 3b. CodeBuddy IDE 远程（VS Code Remote 连 Linux 服务器，见 codebuddy_ide_remote.go）
+	sessions = append(sessions, CollectCodeBuddyIDERemoteSessions()...)
+
 	// 4. WorkBuddy 桌面版（SQLite 库 ~/.workbuddy/workbuddy.db 的 sessions 表，
 	//    status 字段直读，无需 Hook）
 	sessions = append(sessions, CollectWorkBuddyDBSessions()...)
