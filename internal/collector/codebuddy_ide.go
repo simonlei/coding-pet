@@ -1,231 +1,391 @@
 // Package collector 中 codebuddy_ide.go 采集 CodeBuddy IDE 的会话状态。
 //
-// CodeBuddy IDE 不写 ~/.codebuddy 那套 PID 文件 + JSONL，而是把每个 workspace 的
-// 会话历史落在扩展数据目录下的 history/ 里：
+// CodeBuddy IDE 将会话数据存储在两个位置：
+//   1. SQLite 数据库 (%APPDATA%\CodeBuddy CN\codebuddy-sessions.vscdb)
+//      - ItemTable: key="session:<conversationId>", value=JSON{conversationId, cwd, title, status, updatedAt, ...}
+//      - status 字段: Working / Completed
+//   2. 消息队列 JSON (%APPDATA%\CodeBuddy CN\User\globalStorage\...\message-queue\<wsHash>.json)
+//      - conversations[conversationId].runtime.{activated, paused}
+//      - 提供实时运行时状态
 //
-//	<extRoot>/Data/<安装GUID>/CodeBuddyIDE/<安装GUID>/history/
-//	  <workspaceHash>/
-//	    index.json                     —— 该 workspace 的会话列表 + current（当前会话 id）
-//	    <conversationId>/
-//	      index.json                   —— messages[] 索引 + requests[]（含 state）
-//	      messages/<msgId>.json        —— 单条消息正文（外层 {role,message}，message 为 JSON 字符串）
+// 状态映射:
+//   - Working + activated + !paused + age < 3min       → active
+//   - Working + activated + !paused + 3min ≤ age < 30min → waiting_for_input
+//   - Working + paused                                  → waiting_for_input
+//   - Working + !activated                              → waiting_for_input
+//   - Completed + age < 30min                           → waiting_for_input
+//   - 任意    + age ≥ 30min                              → 不上报
 //
-// 平台根目录（<extRoot>）：
-//   - Windows：%LOCALAPPDATA%\CodeBuddyExtension
-//   - macOS：  ~/Library/Application Support/CodeBuddyExtension
-//
-// 会话状态取该会话 index.json 里 requests[] 最后一个的 state（running / complete）。
-// 注意中间轮次可能残留 state=running（回合被中断留下的僵尸），只有最后一个才代表现状。
-//
-// 磁盘上没有 PID、没有心跳、也无法感知 IDE 是否已关闭，因此判活只能靠 index.json 的
-// mtime 做新鲜度衰减，语义与 WorkBuddy 桌面版（workbuddy_db.go）保持一致：
-//   - running   且 age < 3min          → active（顶部绿色活跃）
-//   - running   且 3min ≤ age < 30min  → waiting_for_input（停滞/僵尸，掉出高亮）
-//   - complete  且 age < 30min          → waiting_for_input（一轮答完等用户下条指令）
-//   - 任意       且 age ≥ 30min          → 不上报（视为 IDE 已关闭）
-//
-// 前端 HOOK_ONLY_TOOLS = { codebuddy_ide, workbuddy } 已有 3 分钟降级逻辑，采集端只要
-// 打上 Tool=codebuddy_ide 并给对 state / last_activity，即自动复用「黄闪 3min → 淡黄半小时」展示。
-//
-// 当前上下文占用 token 取自会话 index.json 里最后一个带 usage 的 request 的
-// usage.lastTokens（随轮次单调增长的窗口占用）；无 usage 时降级为 0，前端不展示。
+// 上下文占用 token 从 history 目录读取（usage.lastTokens），SQLite / message-queue 不含此信息。
+
 package collector
 
 import (
+	"crypto/md5"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
+	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
+// ---- 常量 ----
+
 const (
-	// cbIDEActiveWindow：running 会话最近一次写盘在此窗口内 → 仍算「活跃」。
+	// cbIDEActiveWindow: Working 会话最近一次写盘在此窗口内 → 仍算「活跃」。
 	cbIDEActiveWindow = 3 * time.Minute
-	// cbIDEStaleWindow：任何会话超过此窗口无写盘 → 视为已终止，不再上报。
+	// cbIDEStaleWindow: 任何会话超过此窗口无写盘 → 视为已终止，不再上报。
 	cbIDEStaleWindow = 30 * time.Minute
 )
 
-// cbIDEWorkspaceIndex 对应 history/<workspaceHash>/index.json。
-// 只关心 current（IDE 当前打开可见的会话 id）。
-type cbIDEWorkspaceIndex struct {
-	Current string `json:"current"`
+// ---- SQLite 会话结构 ----
+
+// cbIDESessionValue 对应 SQLite ItemTable 中 key="session:<id>" 的 value JSON。
+type cbIDESessionValue struct {
+	ConversationId string `json:"conversationId"`
+	Cwd            string `json:"cwd"`
+	UserId         string `json:"userId"`
+	Title          string `json:"title"`
+	Status         string `json:"status"`    // Working / Completed
+	CreatedAt      int64  `json:"createdAt"` // Unix ms
+	UpdatedAt      int64  `json:"updatedAt"` // Unix ms
+	Revision       int    `json:"revision"`
+	UpdatedBy      string `json:"updatedBy"` // "ide" or agent name
+	DeletedAt      *int64 `json:"deletedAt"`
 }
 
+// ---- 消息队列结构 ----
+
+// cbIDEMessageQueueFile 对应 message-queue/<workspaceHash>.json。
+type cbIDEMessageQueueFile struct {
+	Version       int                            `json:"version"`
+	LastUpdated   int64                          `json:"lastUpdated"`
+	Conversations map[string]cbIDEMQConversation `json:"conversations"`
+}
+
+// cbIDEMQConversation 对应单个 conversation 的队列条目。
+type cbIDEMQConversation struct {
+	Version        int            `json:"version"`
+	ConversationId string         `json:"conversationId"`
+	UpdatedAt      int64          `json:"updatedAt"`
+	Runtime        cbIDEMQRuntime `json:"runtime"`
+}
+
+// cbIDEMQRuntime 运行时状态。
+type cbIDEMQRuntime struct {
+	Activated           bool  `json:"activated"`
+	Paused              bool  `json:"paused"`
+	AwaitingSessionIdle bool  `json:"awaitingSessionIdle"`
+	UpdatedAt           int64 `json:"updatedAt"`
+}
+
+// ---- history 目录结构（仅用于 context token 回退读取） ----
+
 // cbIDEConversationIndex 对应 history/<workspaceHash>/<convId>/index.json。
-// messages 用于回溯 CWD，requests 的末态用于判定会话状态。
 type cbIDEConversationIndex struct {
 	Messages []struct {
 		ID   string `json:"id"`
 		Role string `json:"role"`
 	} `json:"messages"`
 	Requests []struct {
-		State string `json:"state"` // running / complete
-		// usage.lastTokens 是该轮结束时的上下文窗口占用（随轮次单调增长），
-		// 即「当前上下文占用」的语义；inputTokens 是该轮所有子调用的累计输入
-		// （可达百万），不适合作占用展示。running 中的轮次 usage 缺失（为 nil）。
+		State string `json:"state"`
 		Usage *struct {
 			LastTokens int64 `json:"lastTokens"`
 		} `json:"usage"`
 	} `json:"requests"`
 }
 
-// cbIDEMessageFile 对应 messages/<msgId>.json，外层信封。
-// message 字段本身是一段 JSON 字符串（{role,content:[...]}）。
-type cbIDEMessageFile struct {
-	Message string `json:"message"`
-}
+// ---- SQLite 连接缓存 ----
 
-// codebuddyIDEHistoryRoots 返回本机所有 CodeBuddy IDE history 根目录。
-//
-// 安装 GUID 不固定（一台机器可能有多个账号/安装），且不同 profile 的层级略有差异：
-//   - GUID profile： <extRoot>/Data/<GUID>/CodeBuddyIDE/<GUID>/history
-//   - default profile：<extRoot>/Data/default/CodeBuddyIDE/history（少一层 GUID）
-//
-// 故用两个 glob 模式分别展开、去重。目录不存在时返回空，上层自然跳过。
-func codebuddyIDEHistoryRoots() []string {
-	extRoot, ok := codebuddyExtensionRoot()
-	if !ok {
-		return nil
-	}
-	patterns := []string{
-		filepath.Join(extRoot, "Data", "*", "CodeBuddyIDE", "*", "history"),
-		filepath.Join(extRoot, "Data", "*", "CodeBuddyIDE", "history"),
-	}
-	seen := make(map[string]bool)
-	var roots []string
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			continue
-		}
-		for _, m := range matches {
-			if seen[m] {
-				continue
-			}
-			seen[m] = true
-			roots = append(roots, m)
-		}
-	}
-	return roots
-}
+var (
+	cbIDEDBOnce sync.Mutex
+	cbIDEDBConn *sql.DB
+)
 
-// codebuddyExtensionRoot 返回 CodeBuddyExtension 数据根目录及其是否存在。
-func codebuddyExtensionRoot() (string, bool) {
+// ---- 平台路径 ----
+
+// codebuddyIDEAppDataRoot 返回 CodeBuddy IDE 的 AppData 根目录。
+// Windows: %APPDATA%\CodeBuddy CN 或 %APPDATA%\CodeBuddy
+// macOS:   ~/Library/Application Support/CodeBuddy CN 或 ~/Library/Application Support/CodeBuddy
+func codebuddyIDEAppDataRoot() (string, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", false
 	}
-	var root string
+	var base string
 	switch runtime.GOOS {
 	case "windows":
-		// %LOCALAPPDATA%，回退 ~/AppData/Local。
-		local := os.Getenv("LOCALAPPDATA")
-		if local == "" {
-			local = filepath.Join(home, "AppData", "Local")
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = filepath.Join(home, "AppData", "Roaming")
 		}
-		root = filepath.Join(local, "CodeBuddyExtension")
+		base = appData
 	case "darwin":
-		root = filepath.Join(home, "Library", "Application Support", "CodeBuddyExtension")
+		base = filepath.Join(home, "Library", "Application Support")
 	default:
-		return "", false // 其它平台暂不支持 CodeBuddy IDE
-	}
-	if _, err := os.Stat(root); err != nil {
 		return "", false
 	}
-	return root, true
+	for _, name := range []string{"CodeBuddy CN", "CodeBuddy"} {
+		dir := filepath.Join(base, name)
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			return dir, true
+		}
+	}
+	return "", false
 }
 
-// CollectCodeBuddyIDESessions 扫描所有 history 根目录，返回活跃/等待中的 IDE 会话。
-// 每个 workspace 只看 current 指向的会话（IDE 当前可见的那个）。
-// 任一环节出错都安静跳过，不阻塞其他采集源。
+// codebuddyIDEDBPath 返回 codebuddy-sessions.vscdb 的路径。测试可注入替代实现。
+var codebuddyIDEDBPath = func() (string, bool) {
+	root, ok := codebuddyIDEAppDataRoot()
+	if !ok {
+		return "", false
+	}
+	p := filepath.Join(root, "codebuddy-sessions.vscdb")
+	if _, err := os.Stat(p); err != nil {
+		return "", false
+	}
+	return p, true
+}
+
+// codebuddyIDEMessageQueueDir 返回 message-queue 目录。测试可注入替代实现。
+var codebuddyIDEMessageQueueDir = func() (string, bool) {
+	root, ok := codebuddyIDEAppDataRoot()
+	if !ok {
+		return "", false
+	}
+	p := filepath.Join(root, "User", "globalStorage", "tencent-cloud.coding-copilot", "message-queue")
+	if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
+		return "", false
+	}
+	return p, true
+}
+
+// ---- database connection ----
+
+// openCodeBuddyIDEDB 惰性打开只读连接并缓存。
+func openCodeBuddyIDEDB() (*sql.DB, bool) {
+	cbIDEDBOnce.Lock()
+	defer cbIDEDBOnce.Unlock()
+
+	if cbIDEDBConn != nil {
+		return cbIDEDBConn, true
+	}
+
+	path, ok := codebuddyIDEDBPath()
+	if !ok {
+		return nil, false
+	}
+
+	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro&_pragma=busy_timeout(3000)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, false
+	}
+	db.SetMaxOpenConns(1)
+	cbIDEDBConn = db
+	return db, true
+}
+
+// resetCodeBuddyIDEDB 关闭并清空缓存句柄。
+func resetCodeBuddyIDEDB() {
+	cbIDEDBOnce.Lock()
+	defer cbIDEDBOnce.Unlock()
+	if cbIDEDBConn != nil {
+		_ = cbIDEDBConn.Close()
+		cbIDEDBConn = nil
+	}
+}
+
+// ---- 主入口 ----
+
+// CollectCodeBuddyIDESessions 从 SQLite + message-queue 采集 IDE 会话。
+// 库不存在或查询失败时返回 nil（不阻塞其他采集源）。
 func CollectCodeBuddyIDESessions() []protocol.SessionInfo {
+	db, ok := openCodeBuddyIDEDB()
+	if !ok {
+		return nil
+	}
+
+	sessions, err := readCodeBuddyIDESessions(db)
+	if err != nil {
+		resetCodeBuddyIDEDB()
+		return nil
+	}
+	if len(sessions) == 0 {
+		return nil
+	}
+
+	runtimeMap := buildCodeBuddyIDERuntimeMap()
+
 	nowMs := time.Now().UnixMilli()
 	var out []protocol.SessionInfo
-	seen := make(map[string]bool) // 同一 conversationId 跨 root 去重
 
-	for _, root := range codebuddyIDEHistoryRoots() {
-		entries, err := os.ReadDir(root)
-		if err != nil {
+	for _, s := range sessions {
+		rt, hasRuntime := runtimeMap[s.ConversationId]
+		state, include := mapCodeBuddyIDEStateFromDB(s, rt, hasRuntime, nowMs)
+		if !include {
 			continue
 		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			wsDir := filepath.Join(root, e.Name())
-			if info, ok := collectCodeBuddyIDEWorkspace(wsDir, nowMs); ok {
-				if seen[info.SessionID] {
-					continue
-				}
-				seen[info.SessionID] = true
-				out = append(out, info)
-			}
-		}
+
+		contextTokens := codebuddyIDEContextTokensFromHistory(s.Cwd, s.ConversationId)
+
+		out = append(out, protocol.SessionInfo{
+			SessionID:     s.ConversationId,
+			PID:           0,
+			Kind:          protocol.KindInteractive,
+			Tool:          protocol.ToolCodeBuddyIDE,
+			CWD:           s.Cwd,
+			StartedAt:     s.CreatedAt,
+			LastHeartbeat: s.UpdatedAt,
+			State:         state,
+			LastActivity:  s.UpdatedAt,
+			ContextTokens: contextTokens,
+		})
 	}
 	return out
 }
 
-// collectCodeBuddyIDEWorkspace 处理单个 workspace 目录，返回其 current 会话的 SessionInfo。
-// 第二个返回值为 false 表示无可上报会话（无 current / 解析失败 / 已过期）。
-func collectCodeBuddyIDEWorkspace(wsDir string, nowMs int64) (protocol.SessionInfo, bool) {
-	var wsIdx cbIDEWorkspaceIndex
-	if !readJSONFile(filepath.Join(wsDir, "index.json"), &wsIdx) || wsIdx.Current == "" {
-		return protocol.SessionInfo{}, false
-	}
-
-	convDir := filepath.Join(wsDir, wsIdx.Current)
-	convIndexPath := filepath.Join(convDir, "index.json")
-
-	// 新鲜度：先 stat 判 age，过期的直接跳过，省下解析历史会话的开销。
-	fi, err := os.Stat(convIndexPath)
+// readCodeBuddyIDESessions 从 SQLite 读取所有未删除的会话。
+func readCodeBuddyIDESessions(db *sql.DB) ([]cbIDESessionValue, error) {
+	rows, err := db.Query(`SELECT key, value FROM ItemTable`)
 	if err != nil {
-		return protocol.SessionInfo{}, false
+		return nil, err
 	}
-	lastActivity := fi.ModTime().UnixMilli()
-	ageMs := nowMs - lastActivity
-	if ageMs >= cbIDEStaleWindow.Milliseconds() {
-		return protocol.SessionInfo{}, false
-	}
+	defer rows.Close()
 
-	var convIdx cbIDEConversationIndex
-	if !readJSONFile(convIndexPath, &convIdx) {
-		return protocol.SessionInfo{}, false
+	var sessions []cbIDESessionValue
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			continue
+		}
+		if len(key) < 9 || key[:8] != "session:" {
+			continue
+		}
+		var s cbIDESessionValue
+		if err := json.Unmarshal([]byte(value), &s); err != nil {
+			continue
+		}
+		if s.DeletedAt != nil {
+			continue
+		}
+		if s.ConversationId == "" {
+			continue
+		}
+		sessions = append(sessions, s)
 	}
-	if len(convIdx.Requests) == 0 {
-		// 空会话（IDE 刚新建、还没发消息）：不算活跃，不上报。
-		return protocol.SessionInfo{}, false
-	}
-
-	lastState := convIdx.Requests[len(convIdx.Requests)-1].State
-	state, include := mapCodeBuddyIDEState(lastState, ageMs)
-	if !include {
-		return protocol.SessionInfo{}, false
-	}
-
-	cwd := codebuddyIDEWorkspaceFolder(convDir, convIdx)
-
-	return protocol.SessionInfo{
-		SessionID:     wsIdx.Current,
-		PID:           0, // IDE 侧无独立 per-session PID
-		Kind:          protocol.KindInteractive,
-		Tool:          protocol.ToolCodeBuddyIDE,
-		CWD:           cwd,
-		StartedAt:     lastActivity, // 无独立起始时间，用最后活动近似
-		LastHeartbeat: lastActivity,
-		State:         state,
-		LastActivity:  lastActivity,
-		ContextTokens: codebuddyIDEContextTokens(convIdx),
-	}, true
+	return sessions, rows.Err()
 }
 
-// codebuddyIDEContextTokens 返回当前上下文占用 token：从后向前找第一个带 usage 的
-// request，取其 usage.lastTokens。最后一轮可能是 running（usage 为 nil），故需回溯。
-// 无任何 usage 时返回 0（优雅降级，前端不展示）。
-func codebuddyIDEContextTokens(convIdx cbIDEConversationIndex) int64 {
+// ---- 消息队列 ----
+
+// buildCodeBuddyIDERuntimeMap 读取所有 message-queue/*.json，构建 conversationId → runtime 映射。
+func buildCodeBuddyIDERuntimeMap() map[string]cbIDEMQRuntime {
+	mqDir, ok := codebuddyIDEMessageQueueDir()
+	if !ok {
+		return nil
+	}
+
+	entries, err := os.ReadDir(mqDir)
+	if err != nil {
+		return nil
+	}
+
+	runtimeMap := make(map[string]cbIDEMQRuntime)
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		var mq cbIDEMessageQueueFile
+		if !readJSONFile(filepath.Join(mqDir, e.Name()), &mq) {
+			continue
+		}
+		for convID, conv := range mq.Conversations {
+			runtimeMap[convID] = conv.Runtime
+		}
+	}
+	return runtimeMap
+}
+
+// ---- 状态映射 ----
+
+// mapCodeBuddyIDEStateFromDB 将 SQLite 会话记录 + 消息队列运行时状态映射为 SessionState。
+// 第二个返回值为 false 表示该会话应从结果中剔除。
+func mapCodeBuddyIDEStateFromDB(s cbIDESessionValue, rt cbIDEMQRuntime, hasRuntime bool, nowMs int64) (protocol.SessionState, bool) {
+	ageMs := nowMs - s.UpdatedAt
+
+	if ageMs >= cbIDEStaleWindow.Milliseconds() {
+		return "", false
+	}
+
+	switch lowerASCII(s.Status) {
+	case "working":
+		if hasRuntime {
+			if rt.Paused {
+				return protocol.StateWaitingForInput, true
+			}
+			if !rt.Activated {
+				return protocol.StateWaitingForInput, true
+			}
+			if ageMs < cbIDEActiveWindow.Milliseconds() {
+				return protocol.StateActive, true
+			}
+			return protocol.StateWaitingForInput, true
+		}
+		// 无消息队列数据：退化为 freshness 猜测
+		if ageMs < cbIDEActiveWindow.Milliseconds() {
+			return protocol.StateActive, true
+		}
+		return protocol.StateWaitingForInput, true
+
+	case "completed":
+		return protocol.StateWaitingForInput, true
+
+	default:
+		return protocol.StateWaitingForInput, true
+	}
+}
+
+// ---- 上下文 token（history 目录回退） ----
+
+// codebuddyIDEContextTokensFromHistory 尝试从 history 目录读取上下文占用 token。
+// history 目录不可达或无数据时返回 0（优雅降级）。
+func codebuddyIDEContextTokensFromHistory(cwd, convID string) int64 {
+	extRoot, ok := codebuddyExtensionRoot()
+	if !ok {
+		return 0
+	}
+
+	wsHash := fmt.Sprintf("%x", md5.Sum([]byte(filepath.ToSlash(cwd))))
+
+	// 尝试两种 profile 模式
+	patterns := []string{
+		filepath.Join(extRoot, "Data", "*", "CodeBuddyIDE", "*", "history", wsHash, convID, "index.json"),
+		filepath.Join(extRoot, "Data", "*", "CodeBuddyIDE", "history", wsHash, convID, "index.json"),
+	}
+
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil || len(matches) == 0 {
+			continue
+		}
+		var convIdx cbIDEConversationIndex
+		if readJSONFile(matches[0], &convIdx) {
+			return codebuddyIDEContextTokensFromIndex(convIdx)
+		}
+	}
+	return 0
+}
+
+// codebuddyIDEContextTokensFromIndex 从 conversation index 提取 context token。
+func codebuddyIDEContextTokensFromIndex(convIdx cbIDEConversationIndex) int64 {
 	for i := len(convIdx.Requests) - 1; i >= 0; i-- {
 		if u := convIdx.Requests[i].Usage; u != nil && u.LastTokens > 0 {
 			return u.LastTokens
@@ -234,64 +394,37 @@ func codebuddyIDEContextTokens(convIdx cbIDEConversationIndex) int64 {
 	return 0
 }
 
-// mapCodeBuddyIDEState 把「最后 request 的 state + 距最后写盘的毫秒数」映射为 SessionState。
-// 第二个返回值为 false 表示该会话应剔除（已过期）。
-func mapCodeBuddyIDEState(lastState string, ageMs int64) (protocol.SessionState, bool) {
-	if ageMs >= cbIDEStaleWindow.Milliseconds() {
+// codebuddyExtensionRoot 返回 CodeBuddyExtension 数据根目录。
+func codebuddyExtensionRoot() (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return "", false
 	}
-	switch lowerASCII(strings.TrimSpace(lastState)) {
-	case "running":
-		if ageMs < cbIDEActiveWindow.Milliseconds() {
-			return protocol.StateActive, true
+	var root string
+	switch runtime.GOOS {
+	case "windows":
+		local := os.Getenv("LOCALAPPDATA")
+		if local == "" {
+			local = filepath.Join(home, "AppData", "Local")
 		}
-		// 3~30 分钟没有再写盘：多半 IDE 已关或回合被中断，掉出高亮，淡黄列表保留。
-		return protocol.StateWaitingForInput, true
-	case "complete":
-		// 一轮答完、等用户下条指令。
-		return protocol.StateWaitingForInput, true
+		root = filepath.Join(local, "CodeBuddyExtension")
+	case "darwin":
+		root = filepath.Join(home, "Library", "Application Support", "CodeBuddyExtension")
 	default:
-		// 未知 state（协议扩展）：窗口内保守显示为等待，不丢失可见性。
-		return protocol.StateWaitingForInput, true
+		return "", false
 	}
+	if _, err := os.Stat(root); err != nil {
+		return "", false
+	}
+	return root, true
 }
 
-// codebuddyIDEWorkspaceFolder 从会话首条 user 消息里回溯 workspace 路径。
-//
-// 首条 user 消息正文含 `<user_info> ... Workspace Folder: <path> ...`，
-// 解析失败时返回空串（前端仍能按 basename 空处理）。
-func codebuddyIDEWorkspaceFolder(convDir string, convIdx cbIDEConversationIndex) string {
-	var firstUserMsgID string
-	for _, m := range convIdx.Messages {
-		if m.Role == "user" {
-			firstUserMsgID = m.ID
-			break
-		}
-	}
-	if firstUserMsgID == "" {
-		return ""
-	}
+// ---- 工具函数 ----
 
-	var mf cbIDEMessageFile
-	if !readJSONFile(filepath.Join(convDir, "messages", firstUserMsgID+".json"), &mf) {
-		return ""
-	}
-	return parseWorkspaceFolder(mf.Message)
-}
-
-// parseWorkspaceFolder 从消息正文里抽取 `Workspace Folder: <path>` 的路径。
-// 正文可能是转义过的 JSON 字符串，故直接按标记子串扫描，取到行尾。
-func parseWorkspaceFolder(body string) string {
-	const marker = "Workspace Folder:"
-	idx := strings.Index(body, marker)
-	if idx < 0 {
-		return ""
-	}
-	rest := body[idx+len(marker):]
-	// 到第一个换行（含转义的 \n）为止。
-	rest = strings.SplitN(rest, "\\n", 2)[0]
-	rest = strings.SplitN(rest, "\n", 2)[0]
-	return strings.TrimSpace(rest)
+// workspaceHash16 返回 CWD 的 16 字符 workspace hash（与 message-queue 文件名一致）。
+func workspaceHash16(cwd string) string {
+	h := md5.Sum([]byte(filepath.ToSlash(cwd)))
+	return fmt.Sprintf("%x", h)[:16]
 }
 
 // readJSONFile 读取并解码一个 JSON 文件到 v，成功返回 true。

@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,259 +11,426 @@ import (
 	"github.com/simonlei/coding-pet-dashboard/internal/protocol"
 )
 
-// TestMapCodeBuddyIDEState 表驱动覆盖 最后request.state × 新鲜度 的所有分支。
-func TestMapCodeBuddyIDEState(t *testing.T) {
-	oneMin := time.Minute.Milliseconds()
+// ---- mapCodeBuddyIDEStateFromDB 单元测试 ----
 
-	cases := []struct {
-		name        string
-		lastState   string
-		ageMs       int64
-		wantState   protocol.SessionState
-		wantInclude bool
-	}{
-		{"running 刚写盘 → active", "running", 10 * 1000, protocol.StateActive, true},
-		{"running 临界2min59s → active", "running", 3*oneMin - 1000, protocol.StateActive, true},
-		{"running 5分钟 → 等待(停滞降级)", "running", 5 * oneMin, protocol.StateWaitingForInput, true},
-		{"running 29分钟 → 等待", "running", 29 * oneMin, protocol.StateWaitingForInput, true},
-		{"running 31分钟 → 剔除", "running", 31 * oneMin, "", false},
-		{"complete 刚完成 → 等待(答完提醒)", "complete", 10 * 1000, protocol.StateWaitingForInput, true},
-		{"complete 20分钟 → 等待", "complete", 20 * oneMin, protocol.StateWaitingForInput, true},
-		{"complete 31分钟 → 剔除", "complete", 31 * oneMin, "", false},
-		{"大小写混用 Running → active", "Running", 10 * 1000, protocol.StateActive, true},
-		{"未知state 窗口内 → 等待", "paused", 1 * oneMin, protocol.StateWaitingForInput, true},
-		{"未知state 超时 → 剔除", "paused", 40 * oneMin, "", false},
+func TestMapCodeBuddyIDEStateFromDB_WorkingActive(t *testing.T) {
+	nowMs := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC).UnixMilli()
+	s := cbIDESessionValue{
+		Status:    "Working",
+		UpdatedAt: nowMs - 2*60*1000, // 2 分钟前
 	}
+	rt := cbIDEMQRuntime{Activated: true, Paused: false}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			gotState, gotInclude := mapCodeBuddyIDEState(tc.lastState, tc.ageMs)
-			if gotInclude != tc.wantInclude {
-				t.Fatalf("include = %v, want %v", gotInclude, tc.wantInclude)
-			}
-			if gotInclude && gotState != tc.wantState {
-				t.Errorf("state = %q, want %q", gotState, tc.wantState)
-			}
-		})
+	state, include := mapCodeBuddyIDEStateFromDB(s, rt, true, nowMs)
+	if !include {
+		t.Fatal("expected included")
+	}
+	if state != protocol.StateActive {
+		t.Fatalf("expected active, got %s", state)
 	}
 }
 
-// TestParseWorkspaceFolder 覆盖真实 message 正文（转义 \n）与普通换行两种情形。
-func TestParseWorkspaceFolder(t *testing.T) {
-	cases := []struct {
-		name string
-		body string
-		want string
-	}{
-		{
-			name: "转义换行的信封文本",
-			body: `<user_info>\nOS Version: win32\nWorkspace Folder: d:/work/coding-pet\nNote: prefer absolute\n</user_info>`,
-			want: "d:/work/coding-pet",
-		},
-		{
-			name: "真实换行",
-			body: "OS Version: darwin\nWorkspace Folder: /Users/simon/proj\nShell: zsh",
-			want: "/Users/simon/proj",
-		},
-		{
-			name: "无标记",
-			body: "no workspace info here",
-			want: "",
-		},
-		{
-			name: "行尾空白被裁剪",
-			body: `Workspace Folder:   d:/work/x  \nrest`,
-			want: "d:/work/x",
-		},
+func TestMapCodeBuddyIDEStateFromDB_WorkingStale(t *testing.T) {
+	nowMs := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC).UnixMilli()
+	s := cbIDESessionValue{
+		Status:    "Working",
+		UpdatedAt: nowMs - 5*60*1000, // 5 分钟前
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := parseWorkspaceFolder(tc.body); got != tc.want {
-				t.Errorf("parseWorkspaceFolder() = %q, want %q", got, tc.want)
-			}
-		})
+	rt := cbIDEMQRuntime{Activated: true, Paused: false}
+
+	state, include := mapCodeBuddyIDEStateFromDB(s, rt, true, nowMs)
+	if !include {
+		t.Fatal("expected included")
+	}
+	if state != protocol.StateWaitingForInput {
+		t.Fatalf("expected waiting_for_input, got %s", state)
 	}
 }
 
-// TestCodebuddyIDEContextTokens 覆盖 usage.lastTokens 的回溯取值逻辑，
-// 走真实采集路径（构造 index.json → collectCodeBuddyIDEWorkspace）验证 ContextTokens。
-func TestCodebuddyIDEContextTokens(t *testing.T) {
-	nowMs := time.Now().UnixMilli()
-
-	cases := []struct {
-		name   string
-		states []string
-		tokens []int64
-		want   int64
-	}{
-		{"单轮取 lastTokens", []string{"complete"}, []int64{20897}, 20897},
-		{"多轮取最后一轮", []string{"complete", "complete"}, []int64{20610, 51613}, 51613},
-		{"末轮running无usage → 回溯上一轮", []string{"complete", "running"}, []int64{62487, 0}, 62487},
-		{"全部无usage → 0（优雅降级）", []string{"running"}, nil, 0},
+func TestMapCodeBuddyIDEStateFromDB_WorkingPaused(t *testing.T) {
+	nowMs := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC).UnixMilli()
+	s := cbIDESessionValue{
+		Status:    "Working",
+		UpdatedAt: nowMs - 1*60*1000, // 1 分钟前但被暂停
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			wsDir := t.TempDir()
-			makeConversationWithTokens(t, wsDir, "conv", tc.states, tc.tokens, "/p", 10*1000)
-			writeJSON(t, filepath.Join(wsDir, "index.json"), map[string]string{"current": "conv"})
+	rt := cbIDEMQRuntime{Activated: true, Paused: true}
 
-			info, ok := collectCodeBuddyIDEWorkspace(wsDir, nowMs)
-			if !ok {
-				t.Fatal("expected a session")
-			}
-			if info.ContextTokens != tc.want {
-				t.Errorf("ContextTokens = %d, want %d", info.ContextTokens, tc.want)
-			}
-		})
+	state, include := mapCodeBuddyIDEStateFromDB(s, rt, true, nowMs)
+	if !include {
+		t.Fatal("expected included")
+	}
+	if state != protocol.StateWaitingForInput {
+		t.Fatalf("expected waiting_for_input (paused), got %s", state)
 	}
 }
 
-// writeJSON 是测试辅助：把 v 写成 JSON 文件（含父目录）。
-func writeJSON(t *testing.T, path string, v any) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+func TestMapCodeBuddyIDEStateFromDB_WorkingNotActivated(t *testing.T) {
+	nowMs := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC).UnixMilli()
+	s := cbIDESessionValue{
+		Status:    "Working",
+		UpdatedAt: nowMs - 1*60*1000,
 	}
-	data, err := json.Marshal(v)
+	rt := cbIDEMQRuntime{Activated: false, Paused: false}
+
+	state, include := mapCodeBuddyIDEStateFromDB(s, rt, true, nowMs)
+	if !include {
+		t.Fatal("expected included")
+	}
+	if state != protocol.StateWaitingForInput {
+		t.Fatalf("expected waiting_for_input (not activated), got %s", state)
+	}
+}
+
+func TestMapCodeBuddyIDEStateFromDB_Completed(t *testing.T) {
+	nowMs := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC).UnixMilli()
+	s := cbIDESessionValue{
+		Status:    "Completed",
+		UpdatedAt: nowMs - 1*60*1000,
+	}
+
+	state, include := mapCodeBuddyIDEStateFromDB(s, cbIDEMQRuntime{}, false, nowMs)
+	if !include {
+		t.Fatal("expected included")
+	}
+	if state != protocol.StateWaitingForInput {
+		t.Fatalf("expected waiting_for_input, got %s", state)
+	}
+}
+
+func TestMapCodeBuddyIDEStateFromDB_StaleExcluded(t *testing.T) {
+	nowMs := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC).UnixMilli()
+	s := cbIDESessionValue{
+		Status:    "Working",
+		UpdatedAt: nowMs - 31*60*1000, // 31 分钟前
+	}
+
+	_, include := mapCodeBuddyIDEStateFromDB(s, cbIDEMQRuntime{}, false, nowMs)
+	if include {
+		t.Fatal("expected excluded for stale session")
+	}
+}
+
+func TestMapCodeBuddyIDEStateFromDB_NoRuntimeFallback(t *testing.T) {
+	nowMs := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC).UnixMilli()
+	s := cbIDESessionValue{
+		Status:    "Working",
+		UpdatedAt: nowMs - 2*60*1000, // 2 分钟，无 runtime 数据
+	}
+
+	// 无消息队列数据时，退化为 freshness 猜测
+	state, include := mapCodeBuddyIDEStateFromDB(s, cbIDEMQRuntime{}, false, nowMs)
+	if !include {
+		t.Fatal("expected included")
+	}
+	if state != protocol.StateActive {
+		t.Fatalf("expected active (fresh + no runtime), got %s", state)
+	}
+
+	// 5 分钟无 runtime → 猜测为 waiting
+	s2 := cbIDESessionValue{Status: "Working", UpdatedAt: nowMs - 5*60*1000}
+	state2, _ := mapCodeBuddyIDEStateFromDB(s2, cbIDEMQRuntime{}, false, nowMs)
+	if state2 != protocol.StateWaitingForInput {
+		t.Fatalf("expected waiting_for_input for stale no-runtime, got %s", state2)
+	}
+}
+
+// ---- readCodeBuddyIDESessions 与 message-queue 集成测试 ----
+
+func TestReadCodeBuddyIDESessions_SQLite(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.vscdb")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?_pragma=journal_mode(WAL)")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	defer db.Close()
+
+	// 创建 ItemTable
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE, value TEXT)`)
+	if err != nil {
 		t.Fatal(err)
 	}
-}
 
-// makeConversation 在 wsDir 下构造一个会话（index.json + 首条 user message），
-// 并把会话 index.json 的 mtime 设成 now-ageMs，返回会话 id。
-func makeConversation(t *testing.T, wsDir, convID string, requestStates []string, workspaceFolder string, ageMs int64) {
-	t.Helper()
-	makeConversationWithTokens(t, wsDir, convID, requestStates, nil, workspaceFolder, ageMs)
-}
-
-// makeConversationWithTokens 同 makeConversation，但可为每个 request 指定 usage.lastTokens。
-// lastTokens 为 nil 时不写 usage 字段（模拟 running 轮次或旧数据）；否则按下标一一对应，
-// 值 <=0 也不写 usage（模拟该轮无占用）。
-func makeConversationWithTokens(t *testing.T, wsDir, convID string, requestStates []string, lastTokens []int64, workspaceFolder string, ageMs int64) {
-	t.Helper()
-	convDir := filepath.Join(wsDir, convID)
-
-	type msgRef struct {
-		ID   string `json:"id"`
-		Role string `json:"role"`
+	// 写入一个 Working 会话
+	sess := cbIDESessionValue{
+		ConversationId: "conv-001",
+		Cwd:            "/home/user/project",
+		Title:          "Test Session",
+		Status:         "Working",
+		CreatedAt:      1000,
+		UpdatedAt:      2000,
 	}
-	type usageRef struct {
-		LastTokens int64 `json:"lastTokens"`
-	}
-	type reqRef struct {
-		State string    `json:"state"`
-		Usage *usageRef `json:"usage,omitempty"`
-	}
-	idx := struct {
-		Messages []msgRef `json:"messages"`
-		Requests []reqRef `json:"requests"`
-	}{}
-	// 首条 user 消息，携带 Workspace Folder 供 CWD 回溯。
-	if workspaceFolder != "" {
-		idx.Messages = append(idx.Messages, msgRef{ID: "m1", Role: "user"})
-		body := "<user_info>\\nWorkspace Folder: " + workspaceFolder + "\\n</user_info>"
-		writeJSON(t, filepath.Join(convDir, "messages", "m1.json"),
-			map[string]string{"role": "user", "message": body})
-	}
-	for i, s := range requestStates {
-		r := reqRef{State: s}
-		if i < len(lastTokens) && lastTokens[i] > 0 {
-			r.Usage = &usageRef{LastTokens: lastTokens[i]}
-		}
-		idx.Requests = append(idx.Requests, r)
-	}
-
-	convIndexPath := filepath.Join(convDir, "index.json")
-	writeJSON(t, convIndexPath, idx)
-
-	mt := time.Now().Add(-time.Duration(ageMs) * time.Millisecond)
-	if err := os.Chtimes(convIndexPath, mt, mt); err != nil {
+	val, _ := json.Marshal(sess)
+	_, err = db.Exec(`INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)`,
+		"session:conv-001", string(val))
+	if err != nil {
 		t.Fatal(err)
 	}
+
+	sessions, err := readCodeBuddyIDESessions(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].ConversationId != "conv-001" {
+		t.Fatalf("got %s", sessions[0].ConversationId)
+	}
+	if sessions[0].Cwd != "/home/user/project" {
+		t.Fatalf("got cwd=%s", sessions[0].Cwd)
+	}
 }
 
-// TestCollectCodeBuddyIDEWorkspace 端到端覆盖单 workspace 采集的关键分支。
-func TestCollectCodeBuddyIDEWorkspace(t *testing.T) {
+func TestReadCodeBuddyIDESessions_SkipsDeleted(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.vscdb")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE, value TEXT)`)
+
+	deletedAt := int64(3000)
+	sess := cbIDESessionValue{
+		ConversationId: "conv-002",
+		Status:         "Completed",
+		DeletedAt:      &deletedAt,
+	}
+	val, _ := json.Marshal(sess)
+	_, _ = db.Exec(`INSERT INTO ItemTable (key, value) VALUES ('session:conv-002', ?)`, string(val))
+
+	sessions, err := readCodeBuddyIDESessions(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("expected 0 sessions (deleted), got %d", len(sessions))
+	}
+}
+
+func TestReadCodeBuddyIDESessions_SkipsNonSessionKeys(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.vscdb")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE, value TEXT)`)
+	_, _ = db.Exec(`INSERT INTO ItemTable (key, value) VALUES ('some_other_key', '{"foo":"bar"}')`)
+
+	sessions, err := readCodeBuddyIDESessions(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("expected 0 sessions, got %d", len(sessions))
+	}
+}
+
+// ---- message queue 测试 ----
+
+func TestBuildCodeBuddyIDERuntimeMap(t *testing.T) {
+	dir := t.TempDir()
+
+	mq := cbIDEMessageQueueFile{
+		Version:   2,
+		Conversations: map[string]cbIDEMQConversation{
+			"conv-a": {
+				ConversationId: "conv-a",
+				Runtime: cbIDEMQRuntime{
+					Activated: true,
+					Paused:    false,
+				},
+			},
+			"conv-b": {
+				ConversationId: "conv-b",
+				Runtime: cbIDEMQRuntime{
+					Activated: false,
+					Paused:    true,
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(mq)
+	os.WriteFile(filepath.Join(dir, "abc123.json"), data, 0644)
+
+	// 手动设置 message queue 路径
+	origMqDir := codebuddyIDEMessageQueueDir
+	codebuddyIDEMessageQueueDir = func() (string, bool) { return dir, true }
+	defer func() { codebuddyIDEMessageQueueDir = origMqDir }()
+
+	runtimeMap := buildCodeBuddyIDERuntimeMap()
+	if len(runtimeMap) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(runtimeMap))
+	}
+	if rt, ok := runtimeMap["conv-a"]; !ok || !rt.Activated || rt.Paused {
+		t.Fatalf("conv-a state mismatch: %+v", rt)
+	}
+	if rt, ok := runtimeMap["conv-b"]; !ok || rt.Activated || !rt.Paused {
+		t.Fatalf("conv-b state mismatch: %+v", rt)
+	}
+}
+
+// ---- workspaceHash16 ----
+
+func TestWorkspaceHash16(t *testing.T) {
+	h := workspaceHash16("d:/work/coding-pet")
+	if len(h) != 16 {
+		t.Fatalf("expected 16 chars, got %d", len(h))
+	}
+	//  hash 应与 IDE 的 message-queue 文件名一致
+	expected := "c5120ee09068571f"
+	if h != expected {
+		t.Fatalf("expected %s, got %s", expected, h)
+	}
+}
+
+// ---- context token 读取 ----
+
+func TestCodebuddyIDEContextTokensFromIndex(t *testing.T) {
+	idx := cbIDEConversationIndex{
+		Requests: []struct {
+			State string `json:"state"`
+			Usage *struct {
+				LastTokens int64 `json:"lastTokens"`
+			} `json:"usage"`
+		}{
+			{State: "complete", Usage: &struct{ LastTokens int64 `json:"lastTokens"` }{LastTokens: 5000}},
+			{State: "running"}, // 无 usage
+		},
+	}
+
+	tokens := codebuddyIDEContextTokensFromIndex(idx)
+	if tokens != 5000 {
+		t.Fatalf("expected 5000, got %d", tokens)
+	}
+}
+
+func TestCodebuddyIDEContextTokensFromIndex_None(t *testing.T) {
+	idx := cbIDEConversationIndex{
+		Requests: []struct {
+			State string `json:"state"`
+			Usage *struct {
+				LastTokens int64 `json:"lastTokens"`
+			} `json:"usage"`
+		}{
+			{State: "running"},
+		},
+	}
+	tokens := codebuddyIDEContextTokensFromIndex(idx)
+	if tokens != 0 {
+		t.Fatalf("expected 0, got %d", tokens)
+	}
+}
+
+// ---- CollectCodeBuddyIDESessions 集成测试 ----
+
+// resetCodeBuddyIDEDBForTest 重置缓存的数据库连接
+func resetCodeBuddyIDEDBForTest() {
+	resetCodeBuddyIDEDB()
+}
+
+func TestCollectCodeBuddyIDESessions_Integration(t *testing.T) {
+	// 创建 mock SQLite
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "codebuddy-sessions.vscdb")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE, value TEXT)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	nowMs := time.Now().UnixMilli()
+	sess := cbIDESessionValue{
+		ConversationId: "conv-integration-1",
+		Cwd:            "/tmp/test-project",
+		Title:          "Integration Test",
+		Status:         "Working",
+		CreatedAt:      nowMs - 60000,
+		UpdatedAt:      nowMs - 30000, // 30 秒前
+	}
+	val, _ := json.Marshal(sess)
+	_, _ = db.Exec(`INSERT INTO ItemTable (key, value) VALUES ('session:conv-integration-1', ?)`, string(val))
+	db.Close()
 
-	t.Run("current=running且新鲜 → active，且末态覆盖中间僵尸running", func(t *testing.T) {
-		wsDir := t.TempDir()
-		// 中间残留 running（僵尸），最后一个仍是 running。
-		makeConversation(t, wsDir, "conv-a", []string{"complete", "running", "running"}, "d:/work/coding-pet", 10*1000)
-		writeJSON(t, filepath.Join(wsDir, "index.json"), map[string]string{"current": "conv-a"})
+	// 创建 mock message-queue
+	mqDir := filepath.Join(dir, "mq")
+	os.MkdirAll(mqDir, 0755)
+	mq := cbIDEMessageQueueFile{
+		Conversations: map[string]cbIDEMQConversation{
+			"conv-integration-1": {
+				ConversationId: "conv-integration-1",
+				Runtime:        cbIDEMQRuntime{Activated: true, Paused: false},
+			},
+		},
+	}
+	mqData, _ := json.Marshal(mq)
+	os.WriteFile(filepath.Join(mqDir, "abc.json"), mqData, 0644)
 
-		info, ok := collectCodeBuddyIDEWorkspace(wsDir, nowMs)
-		if !ok {
-			t.Fatal("expected a session, got none")
-		}
-		if info.State != protocol.StateActive {
-			t.Errorf("state = %q, want active", info.State)
-		}
-		if info.Tool != protocol.ToolCodeBuddyIDE {
-			t.Errorf("tool = %q, want codebuddy_ide", info.Tool)
-		}
-		if info.SessionID != "conv-a" {
-			t.Errorf("session id = %q, want conv-a", info.SessionID)
-		}
-		if info.CWD != "d:/work/coding-pet" {
-			t.Errorf("cwd = %q, want d:/work/coding-pet", info.CWD)
-		}
-	})
+	// Inject paths
+	origDB := codebuddyIDEDBPath
+	origMq := codebuddyIDEMessageQueueDir
+	codebuddyIDEDBPath = func() (string, bool) { return dbPath, true }
+	codebuddyIDEMessageQueueDir = func() (string, bool) { return mqDir, true }
+	defer func() {
+		codebuddyIDEDBPath = origDB
+		codebuddyIDEMessageQueueDir = origMq
+		resetCodeBuddyIDEDBForTest()
+	}()
 
-	t.Run("末态complete → waiting_for_input", func(t *testing.T) {
-		wsDir := t.TempDir()
-		makeConversation(t, wsDir, "conv-b", []string{"running", "complete"}, "/p", 10*1000)
-		writeJSON(t, filepath.Join(wsDir, "index.json"), map[string]string{"current": "conv-b"})
-
-		info, ok := collectCodeBuddyIDEWorkspace(wsDir, nowMs)
-		if !ok {
-			t.Fatal("expected a session")
-		}
-		if info.State != protocol.StateWaitingForInput {
-			t.Errorf("state = %q, want waiting_for_input", info.State)
-		}
-	})
-
-	t.Run("超30分钟 → 不上报", func(t *testing.T) {
-		wsDir := t.TempDir()
-		makeConversation(t, wsDir, "conv-c", []string{"complete"}, "/p", 31*time.Minute.Milliseconds())
-		writeJSON(t, filepath.Join(wsDir, "index.json"), map[string]string{"current": "conv-c"})
-
-		if _, ok := collectCodeBuddyIDEWorkspace(wsDir, nowMs); ok {
-			t.Error("expected stale session to be excluded")
-		}
-	})
-
-	t.Run("空会话(0 requests) → 不上报", func(t *testing.T) {
-		wsDir := t.TempDir()
-		makeConversation(t, wsDir, "conv-d", nil, "/p", 10*1000)
-		writeJSON(t, filepath.Join(wsDir, "index.json"), map[string]string{"current": "conv-d"})
-
-		if _, ok := collectCodeBuddyIDEWorkspace(wsDir, nowMs); ok {
-			t.Error("expected empty conversation to be excluded")
-		}
-	})
-
-	t.Run("无 current → 不上报", func(t *testing.T) {
-		wsDir := t.TempDir()
-		makeConversation(t, wsDir, "conv-e", []string{"complete"}, "/p", 10*1000)
-		writeJSON(t, filepath.Join(wsDir, "index.json"), map[string]string{"current": ""})
-
-		if _, ok := collectCodeBuddyIDEWorkspace(wsDir, nowMs); ok {
-			t.Error("expected no session when current is empty")
-		}
-	})
-
-	t.Run("current 指向不存在的会话 → 不上报", func(t *testing.T) {
-		wsDir := t.TempDir()
-		writeJSON(t, filepath.Join(wsDir, "index.json"), map[string]string{"current": "ghost"})
-
-		if _, ok := collectCodeBuddyIDEWorkspace(wsDir, nowMs); ok {
-			t.Error("expected no session when current points to missing conversation")
-		}
-	})
+	sessions := CollectCodeBuddyIDESessions()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	s := sessions[0]
+	if s.SessionID != "conv-integration-1" {
+		t.Fatalf("got sessionID=%s", s.SessionID)
+	}
+	if s.Tool != protocol.ToolCodeBuddyIDE {
+		t.Fatalf("expected codebuddy_ide tool, got %s", s.Tool)
+	}
+	if s.State != protocol.StateActive {
+		t.Fatalf("expected active, got %s", s.State)
+	}
+	if s.CWD != "/tmp/test-project" {
+		t.Fatalf("expected cwd=/tmp/test-project, got %s", s.CWD)
+	}
 }
+
+// ---- readJSONFile ----
+
+func TestReadJSONFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.json")
+	os.WriteFile(path, []byte(`{"foo":"bar"}`), 0644)
+
+	var m map[string]string
+	if !readJSONFile(path, &m) {
+		t.Fatal("expected success")
+	}
+	if m["foo"] != "bar" {
+		t.Fatalf("got %s", m["foo"])
+	}
+
+	// Missing file
+	if readJSONFile(filepath.Join(dir, "nope.json"), &m) {
+		t.Fatal("expected false for missing file")
+	}
+
+	// Invalid JSON
+	os.WriteFile(path, []byte(`not json`), 0644)
+	if readJSONFile(path, &m) {
+		t.Fatal("expected false for invalid JSON")
+	}
+}
+
+
