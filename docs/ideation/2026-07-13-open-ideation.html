@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Ideation: coding-pet 开放主题探索（Surprise Me）</title>
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --surface: #ffffff;
+    --ink: #1a1918;
+    --ink-2: #4a4842;
+    --ink-3: #6f6b64;
+    --line: #e5e1d8;
+    --line-2: #efece5;
+    --accent: #b0490f;      /* copper */
+    --accent-soft: #fdece0;
+    --accent-text: #7a3208;
+    --good: #2f6d2b;
+    --good-soft: #e3f0e0;
+    --warn: #8a5c00;
+    --warn-soft: #faedc9;
+    --info: #1e5a86;
+    --info-soft: #e0edf7;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: "Inter", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --serif: "Source Serif Pro", Georgia, "Songti SC", serif;
+  }
+  html { background: var(--bg); color: var(--ink); font-family: var(--sans); }
+  body { max-width: 900px; margin-inline: auto; padding: 3rem 1.4rem 6rem; line-height: 1.62; }
+  h1, h2, h3, h4 { line-height: 1.25; color: var(--ink); }
+  h1 { font-size: 2rem; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+  h2 { font-size: 1.35rem; margin: 2.6rem 0 0.9rem; padding-top: 1.2rem; border-top: 1px solid var(--line); letter-spacing: -0.005em; }
+  h3 { font-size: 1.12rem; margin: 1.4rem 0 0.4rem; }
+  p { max-width: 70ch; }
+  code, .mono { font-family: var(--mono); font-size: 0.92em; }
+  a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+
+  .eyebrow { font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  .lede { font-size: 1.05rem; color: var(--ink-2); max-width: 68ch; }
+
+  .metadata { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1.5rem; margin: 1rem 0 2rem; font-size: 0.92rem; color: var(--ink-2); }
+  .metadata dt { font-weight: 600; color: var(--ink-3); }
+
+  .chip { display: inline-block; padding: 0.14rem 0.55rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em; }
+  .chip-axis { background: var(--info-soft); color: var(--info); }
+  .chip-conf { background: var(--good-soft); color: var(--good); }
+  .chip-conf-med { background: var(--warn-soft); color: var(--warn); }
+  .chip-cx { background: var(--accent-soft); color: var(--accent-text); }
+  .chip-basis { background: #efece5; color: var(--ink-2); font-family: var(--mono); font-weight: 500; }
+
+  .subnav { background: var(--line-2); padding: 0.9rem 1.1rem; border-radius: 10px; margin: 1rem 0 1.5rem; }
+  .subnav ol { margin: 0; padding-left: 1.3rem; }
+  .subnav li { margin: 0.15rem 0; }
+
+  article.idea { border: 1px solid var(--line); border-radius: 12px; padding: 1.4rem 1.5rem 1.2rem; margin: 1.25rem 0; background: var(--surface); }
+  article.idea h3 { margin: 0 0 0.4rem; font-size: 1.15rem; }
+  article.idea .head-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.35rem 0 0.9rem; }
+  article.idea dl.strip { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0.6rem 0; font-size: 0.94rem; }
+  article.idea dl.strip dt { font-weight: 600; color: var(--ink-3); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; padding-top: 0.15rem; }
+  article.idea dl.strip dd { margin: 0; color: var(--ink); }
+  article.idea .basis { border-left: 3px solid var(--accent); padding: 0.25rem 0 0.25rem 0.8rem; margin: 0.7rem 0; color: var(--ink-2); font-size: 0.94rem; }
+  article.idea .basis code { background: #f5f2ec; padding: 0.05rem 0.28rem; border-radius: 4px; }
+
+  .diagram { margin: 1rem 0; background: #fdfcf8; border: 1px dashed var(--line); border-radius: 8px; padding: 0.9rem 0.8rem 0.5rem; }
+  .diagram figcaption { font-size: 0.82rem; color: var(--ink-3); margin-top: 0.35rem; text-align: center; }
+  .diagram svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.94rem; }
+  th, td { text-align: left; padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+  th { background: var(--line-2); font-weight: 600; color: var(--ink-2); font-size: 0.82rem; letter-spacing: 0.04em; text-transform: uppercase; }
+
+  .callout { background: var(--accent-soft); border-radius: 10px; padding: 1rem 1.2rem; margin: 1.4rem 0; }
+  .callout .eyebrow { color: var(--accent-text); }
+
+  footer.composition-signal { margin-top: 4rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 0.82rem; }
+</style>
+</head>
+<body>
+
+<div class="eyebrow">Ideation · Surprise-Me · Repo-Grounded</div>
+<h1>coding-pet：开放主题的新想法探索</h1>
+<p class="lede">在没有指定子话题的情况下，6 个 lens agent 各自从代码库、近期 commit、外部同类工具（claude-fleet、agent-farm、Cursor Cloud、Extendo 等）中，挑最值得推的方向。48 个 raw idea 收敛为 7 个 survivor，重点在跨 frame 的组合上：把当下几条独立的产品线（notifier / android bridge / collector / store）拼成一个统一的产品动作。</p>
+
+<dl class="metadata">
+  <dt>Date</dt><dd><time datetime="2026-07-13">2026-07-13</time></dd>
+  <dt>Topic</dt><dd>open-ideation</dd>
+  <dt>Focus</dt><dd>Surprise me（无指定子话题）</dd>
+  <dt>Mode</dt><dd>repo-grounded</dd>
+  <dt>Raw / Survivors</dt><dd>48 raw · 7 ranked · 41 cut</dd>
+</dl>
+
+<h2>Grounding Context — Codebase Snapshot</h2>
+
+<p><strong>项目形态：</strong>Go 1.25+ 项目，两个二进制 <code>cmd/agent</code>（每台开发机） + <code>cmd/server</code>（中心，内存 <code>Store</code>，无 DB，90s→offline / 24h→evicted），加一个 ~1355 LOC 的 Android WebView 客户端和 951 行内嵌 vanilla-JS 前端。四类采集：CodeBuddy CLI（PID + JSONL 尾部反扫）、CodeBuddy IDE（history/ mtime 衰减，Linux 静默跳过）、WorkBuddy（只读 SQLite）、Claude Code（事件驱动 status/waitingFor）。</p>
+
+<p><strong>近期方向：</strong>7 月 10 日一口气落地了 <code>internal/notifier</code>（Detector + Dispatcher + Target + Redact，~1700 LOC），主打企业微信群机器人推送；<code>Dispatcher</code> 接口 + <code>kind</code> 字段为 dingtalk / lark / slack / 通用 webhook 预留。前后紧跟着 Android 自更新、跨境网络的 30 min 超时、跳过 <code>android-v*</code> tag、以及 Claude Code 的 <code>idle → waiting_for_input</code> 语义对齐。<strong>前沿明显在「主动 push 通道」和「更精细的空闲/等待判定」这两根线。</strong></p>
+
+<p><strong>可见杠杆点：</strong>Server 无 DB 是刻意选择；<code>Detector.ReconcileAt</code> 已经算出状态迁移（可复用为事件源）；<code>~/.coding-pet/targets.json</code> 10s 热重载是通用的 hot-config primitive，目前只服务 targets；<code>window.CodingPetHost</code> JS→Native 桥今天只用了 <code>setAlert(count)</code>；<code>SessionInfo.ContextTokens</code> 已从后端一路传到前端但 UI 里没用；<code>TOOL_LABELS</code> 在 <code>index.html:821-825</code> 漏了 <code>codebuddy_ide</code>（现存 bug）。</p>
+
+<p><strong>外部同类：</strong>tianyilt/claude-fleet、Dicklesworthstone/claude_code_agent_farm、beefin/amux、onikan27/claude-code-monitor、SethGammon/Citadel、Dagger Container Use、Cursor Cloud Agents、Warp Drive、Extendo（voice-first HITL）。市场信号：494 个 fleet/farm 类仓库集中在 macOS + 单机 + tmux；<strong>多机器 + Android 是 coding-pet 的稀缺护城河</strong>。反复出现的痛点：漏掉权限提示、忘掉 session 目的、找不回过去的工作。</p>
+
+<h2>Topic Axes</h2>
+<p><em>Decomposition skipped — surprise-me mode</em>（各 frame 自主选题；跨主题分散正是 surprise-me 的价值所在）。</p>
+
+<h2>Ranked Ideas</h2>
+
+<nav class="subnav">
+  <ol>
+    <li><a href="#idea-1">Reply Lane — 通知即操作台（一键回复 + 全双工桥）</a></li>
+    <li><a href="#idea-2">Event Bus 底座 — SSE 推送 + 追加式历史，替代 1s 轮询</a></li>
+    <li><a href="#idea-3">通知升级阶梯 + 路由规则引擎（Andon-style）</a></li>
+    <li><a href="#idea-4">ARP 协议 + Collector SPI — 从 scraper 变成 hub</a></li>
+    <li><a href="#idea-5">按项目/任务分组：机器降为元数据</a></li>
+    <li><a href="#idea-6">首条消息 Purpose 面包屑</a></li>
+    <li><a href="#idea-7">主动 PAR 心跳：静默 Agent 告警</a></li>
+  </ol>
+</nav>
+
+<!-- Idea 1 -->
+<article class="idea" id="idea-1">
+<h3>1. Reply Lane — 通知即操作台（一键回复 + 全双工桥）</h3>
+<div class="head-meta">
+  <span class="chip chip-axis">Cross-cutting: F3.5 + F4.2 + F6.6</span>
+  <span class="chip chip-conf">Confidence 82%</span>
+  <span class="chip chip-cx">Complexity M</span>
+</div>
+
+<p><strong>Description.</strong> 让推送出去的那条消息本身就是一个"操作台"。企业微信 / DingTalk / Lark 全部支持带按钮的卡片消息，Slack Block Kit 更是原生的。为每次 <code>waiting_for_approval</code> 事件生成一条带签名的一次性回执链接（<code>POST /api/reply/{session_id}?token=…&amp;action=approve|reject</code>）；server 收到后通过一个新增的 <code>agent side-channel</code>（TCP 长连或每 tick 的 <code>/api/report</code> 回执字段）把决定回带到开发机上，agent 侧再把决定灌进对应工具的 approval 通道（CodeBuddy CLI 有 <code>subagents/*.jsonl</code>，Claude Code 支持 hooks，WorkBuddy 走 SQLite 写回）。<code>window.CodingPetHost</code> 顺势从只有 <code>setAlert(count)</code> 变成 双向 RPC，Android 端可以直接锁屏上一键批准。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 220" role="img" aria-labelledby="idea1-title">
+<title id="idea1-title">Reply Lane 流：push → 一键点击 → server → 回带到 agent → agent 灌进工具</title>
+<defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4a4842"/></marker>
+</defs>
+<rect x="10" y="30" width="120" height="60" rx="6" fill="#e3f0e0" stroke="#2f6d2b" stroke-width="1"/>
+<text x="70" y="55" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="600">agent</text>
+<text x="70" y="72" text-anchor="middle" font-family="Inter, sans-serif" font-size="10">waiting_for_approval</text>
+<rect x="180" y="30" width="120" height="60" rx="6" fill="#fdece0" stroke="#b0490f" stroke-width="1"/>
+<text x="240" y="55" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="600">server</text>
+<text x="240" y="72" text-anchor="middle" font-family="Inter, sans-serif" font-size="10">签名一次性 URL</text>
+<rect x="350" y="10" width="120" height="60" rx="6" fill="#e0edf7" stroke="#1e5a86" stroke-width="1"/>
+<text x="410" y="35" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="600">企微 / 手机 App</text>
+<text x="410" y="52" text-anchor="middle" font-family="Inter, sans-serif" font-size="10">[允许] [拒绝]</text>
+<rect x="350" y="90" width="120" height="60" rx="6" fill="#e0edf7" stroke="#1e5a86" stroke-width="1"/>
+<text x="410" y="115" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="600">Android WebView</text>
+<text x="410" y="132" text-anchor="middle" font-family="Inter, sans-serif" font-size="10">锁屏一键</text>
+<rect x="520" y="30" width="150" height="60" rx="6" fill="#fdece0" stroke="#b0490f" stroke-width="1"/>
+<text x="595" y="55" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="600">回带决定</text>
+<text x="595" y="72" text-anchor="middle" font-family="Inter, sans-serif" font-size="10">/api/report 回执字段</text>
+<line x1="130" y1="60" x2="180" y2="60" stroke="#4a4842" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="300" y1="45" x2="350" y2="35" stroke="#4a4842" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="300" y1="75" x2="350" y2="115" stroke="#4a4842" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="410" y1="70" x2="410" y2="90" stroke="#4a4842" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M 470 40 Q 500 60 520 60" stroke="#4a4842" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+<path d="M 470 130 Q 520 130 570 90" stroke="#4a4842" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+<text x="350" y="200" text-anchor="middle" font-family="Inter, sans-serif" font-size="10" fill="#6f6b64">同一签名 token 在企微和 Android 端都可以按下；agent 侧幂等落地</text>
+</svg>
+<figcaption>回执链路示意（示意性，非最终协议图）</figcaption>
+</figure>
+
+<div class="basis">
+<strong>Basis · direct.</strong> <code>internal/notifier/dispatcher.go:23-32</code> 已经把 <code>Dispatcher</code> 接口 + <code>kind</code> 字段设计为多厂商可插拔；<code>MainActivity.kt:201-214</code> 的 JS↔Native 桥已经存在，只用了一个方法；<code>internal/collector/jsonl.go:285-310</code> 已经能识别 subagent approval 事件，说明 approval 通道本身是可写的。<strong>External.</strong> Extendo (egradman/extendo-cli) 已经在做 voice-first HITL 的相同故事；Cursor Cloud Agents 从 iOS/Android/Slack 起会话。<strong>Reasoned.</strong> 目前 push 是单向的：user 收到通知 → 走到笔记本前 → 按一下 → 才继续。这个"走过去"是 8pm 后所有等待时间的中位数来源；把它压到 0 秒的路径已经全部具备。
+</div>
+
+<dl class="strip">
+  <dt>Rationale</dt><dd>把产品从「监控器」变成「遥控器」。494 个 fleet 仓库里几乎没有做到这一层的（Cursor Cloud 只在 web），加上你已经有的 Android + 中国生态 push 通道（企微），这是最容易做出差异化的一步。</dd>
+  <dt>Downsides</dt><dd>签名 token 的重放/伪造攻击面变大（HMAC + 30s TTL + per-session single-use 足够）；agent 侧需要新增一个「等待远程决定」的中间状态，否则重复回执会错乱；不同工具的 approval 通道形状差异大，一期先做 Claude Code hooks 最干净。</dd>
+</dl>
+<p><em>Meeting test.</em> "手表上批准了 <code>git status</code>——这一秒起，coding-pet 就不再只是通知栏。"</p>
+</article>
+
+<!-- Idea 2 -->
+<article class="idea" id="idea-2">
+<h3>2. Event Bus 底座 — SSE 推送 + 追加式历史，替代 1s 轮询</h3>
+<div class="head-meta">
+  <span class="chip chip-axis">Cross-cutting: F4.6 + F1.7 + F3.2</span>
+  <span class="chip chip-conf">Confidence 88%</span>
+  <span class="chip chip-cx">Complexity M</span>
+</div>
+
+<p><strong>Description.</strong> 停止对 <code>Store</code> 做每秒一次的全量 deep-copy 轮询。把 <code>Detector.ReconcileAt</code> 已经算出来的状态迁移（<code>transition</code> 事件）、每次 <code>/api/report</code> 里带来的心跳 diff，统一进一条带单调 seq 的追加式内存 ring buffer（24h 上限、可选落一份 WAL 到 <code>~/.coding-pet/events.jsonl</code>）。前端浏览器订阅 <code>GET /api/events?since={seq}</code>（SSE）、notifier 订阅同一条流、Android 也订阅同一条；<strong>三个消费者一个源</strong>。副产品：<code>?since=</code> 换来天然的 <em>「昨晚 8 点到现在这台 box 发生了什么」</em> 回放能力，无需引入外部 DB。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 240" role="img" aria-labelledby="idea2-title">
+<title id="idea2-title">事件总线：一条追加流，三个订阅者</title>
+<defs>
+  <marker id="arr2" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4a4842"/></marker>
+</defs>
+<rect x="30" y="90" width="130" height="60" rx="6" fill="#e3f0e0" stroke="#2f6d2b"/>
+<text x="95" y="115" text-anchor="middle" font-family="Inter" font-size="12" font-weight="600">agents</text>
+<text x="95" y="132" text-anchor="middle" font-family="Inter" font-size="10">/api/report diff</text>
+<rect x="200" y="70" width="200" height="100" rx="8" fill="#fdece0" stroke="#b0490f" stroke-width="1.5"/>
+<text x="300" y="95" text-anchor="middle" font-family="Inter" font-size="13" font-weight="600">Append-only Event Log</text>
+<text x="300" y="115" text-anchor="middle" font-family="Inter" font-size="10">seq: 42 · state_transition</text>
+<text x="300" y="130" text-anchor="middle" font-family="Inter" font-size="10">seq: 43 · context_gt_80%</text>
+<text x="300" y="145" text-anchor="middle" font-family="Inter" font-size="10">seq: 44 · idle_gt_5min</text>
+<text x="300" y="160" text-anchor="middle" font-family="Inter" font-size="10">... (24h ring)</text>
+<rect x="450" y="20" width="200" height="45" rx="6" fill="#e0edf7" stroke="#1e5a86"/>
+<text x="550" y="47" text-anchor="middle" font-family="Inter" font-size="12">浏览器 · SSE ?since=</text>
+<rect x="450" y="95" width="200" height="45" rx="6" fill="#e0edf7" stroke="#1e5a86"/>
+<text x="550" y="122" text-anchor="middle" font-family="Inter" font-size="12">notifier · 规则订阅</text>
+<rect x="450" y="170" width="200" height="45" rx="6" fill="#e0edf7" stroke="#1e5a86"/>
+<text x="550" y="197" text-anchor="middle" font-family="Inter" font-size="12">Android RPC · state push</text>
+<line x1="160" y1="120" x2="200" y2="120" stroke="#4a4842" stroke-width="1.5" marker-end="url(#arr2)"/>
+<line x1="400" y1="90" x2="450" y2="42" stroke="#4a4842" stroke-width="1.5" marker-end="url(#arr2)"/>
+<line x1="400" y1="120" x2="450" y2="117" stroke="#4a4842" stroke-width="1.5" marker-end="url(#arr2)"/>
+<line x1="400" y1="150" x2="450" y2="192" stroke="#4a4842" stroke-width="1.5" marker-end="url(#arr2)"/>
+</svg>
+<figcaption>一条追加流，三个订阅者；<code>?since=</code> 顺便解决历史回放</figcaption>
+</figure>
+
+<div class="basis">
+<strong>Basis · direct.</strong> <code>internal/server/store.go:82-97</code> 「deep-copies every dashboard read (O(n) per 1s poll — the busy loop)」；<code>internal/notifier/detector.go:105-187</code> 「single-shot armed baseline + 5s debounce + 60s GC」已经在计算状态迁移事件；<code>internal/notifier/target.go:187-252</code> 10s 热重载已经是 hot-config primitive，语义上就是 pub-sub 的第一个消费者。项目里说的「no historical view (no DB)」在 grounding 里被标为一个 gap。<strong>Reasoned.</strong> 一条事件流服务三个消费者，比"三个消费者三个私有轮询"少一个数量级的 CPU；<code>?since=</code> 让「重启不丢通知」和「回放调 detector bug」全都免费。
+</div>
+
+<dl class="strip">
+  <dt>Rationale</dt><dd>这是"1 个决策解锁 5 个未来功能"的经典 leverage 动作。历史查询、SSE、Android 推、notifier 规则化、回放调 bug 全部落在同一个基础设施上。<strong>它是 Idea 3 / 5 / 7 的公共前提。</strong></dd>
+  <dt>Downsides</dt><dd>需要设计 seq 的分配（谁分配、如何 monotonic across restart，简单方案：内存自增 + 启动时 <code>time.Now().UnixMicro()</code> 抬底）；WAL 可选功能会增加文件写入压力；SSE 在企业代理下偶尔不稳，需要一条 fallback 到 long-poll。</dd>
+</dl>
+<p><em>Meeting test.</em> "我们那个 <code>store.go</code> 里的 deep-copy busy loop 现在没了；顺手加了 <code>/api/events?since=</code>——所以昨晚断线的机器一上线就能接着放。"</p>
+</article>
+
+<!-- Idea 3 -->
+<article class="idea" id="idea-3">
+<h3>3. 通知升级阶梯 + 路由规则引擎（Andon-style）</h3>
+<div class="head-meta">
+  <span class="chip chip-axis">Cross-cutting: F1.1 + F3.7 + F2.7</span>
+  <span class="chip chip-conf">Confidence 85%</span>
+  <span class="chip chip-cx">Complexity M</span>
+</div>
+
+<p><strong>Description.</strong> 目前 <code>Detector</code> 单次触发单次推送、5s debounce、无分级。给它加两件事：<strong>(a)</strong> 时间分级的升级阶梯 —— 5s 软 ping → 60s 复发 → 5min「stalled」响铃，靠现有的 60s GC 记账即可实现；<strong>(b)</strong> 把 <code>targets.json</code> 从静态 fanout 变成一个规则引擎（<code>targets.d/*.json</code>），写规则："IF waiting_for_input AND workhours THEN slack;  IF unresponded &gt; 10min THEN escalate;  IF value_velocity_collapse THEN team_channel"。<strong>(c)</strong> 附赠：把 5s debounce 从"等 5 秒确认后才发"翻转成"立刻发，5 秒内 flap 则 <em>edit</em> 消息为 '误报，撤销'"——企微、飞书、Slack 都支持消息编辑；中位延迟从 5s 掉到 ~1s。</p>
+
+<div class="basis">
+<strong>Basis · direct.</strong> <code>internal/notifier/detector.go:105-187</code> 现有 5s debounce + 60s GC + 稳定跃迁语义；<code>internal/notifier/target.go:158-183</code> 的 atomic tmp+rename、0700/0600 权限、10s 热重载已经是规则文件的合适底座；<code>internal/notifier/dispatcher.go:23-32</code> 保留了 kind 字段。<strong>External.</strong> PagerDuty / Opsgenie 全是规则引擎；Toyota Andon 的分级灯柱是这一类 UX 的 canonical 原型；claude-fleet 显式列了 <code>stalled(5+min)</code> 桶但没做升级 —— 你可以做到。<strong>Reasoned.</strong> 一次推送对"等 5s 就走开的人"和"忙别的忘了 30 分钟的人"是同一响应；把它变成"越等越大声"符合真实的注意力衰减。
+</div>
+
+<dl class="strip">
+  <dt>Rationale</dt><dd>「等 5s 才推」是当前设计里最贵的一个决定 —— 它默认所有等待都值得延迟。翻转成"立即推 + 撤回"是把延迟主动收敛到 1s。规则引擎则把每个用户都会问的"别在开会时炸我"变成一行 JSON。</dd>
+  <dt>Downsides</dt><dd>消息 edit 语义需要每个 dispatcher 单独实现（wechat_work 支持有限）；规则引擎会滋生自己的一套小 DSL —— 一期只做布尔字段匹配，别过早引入表达式解析器；升级阶梯里的"stalled"要区分开"agent 停了"和"人忙别的"，不然它会变成新的噪音源（见 Idea 7 的 PAR）。</dd>
+</dl>
+<p><em>Meeting test.</em> "我不再解释 debounce 是 5s 还是 1s —— 这个字段现在是 <code>~/.coding-pet/targets.d/default.json</code> 里的一行。"</p>
+</article>
+
+<!-- Idea 4 -->
+<article class="idea" id="idea-4">
+<h3>4. ARP 协议 + Collector SPI — 从 scraper 变成 hub</h3>
+<div class="head-meta">
+  <span class="chip chip-axis">Cross-cutting: F3.1 + F4.3 + F6.3 + F4.8</span>
+  <span class="chip chip-conf-med chip-conf" style="background:var(--warn-soft);color:var(--warn);">Confidence 68%</span>
+  <span class="chip chip-cx">Complexity L</span>
+</div>
+
+<p><strong>Description.</strong> 今天四个 collector 分别 reverse-engineer 四种私有磁盘格式：JSONL 尾扫 + logstate 修正、<code>history/</code> mtime 衰减、SQLite LEFT JOIN、Claude Code 事件字段。<strong>发布一个小小的公开线协议 ARP（Agent Reporting Protocol）</strong>：agent 只接 <code>POST /api/event</code> 的 JSON 帧，schema 就是 <code>SessionInfo</code>。原来的四个 collector 变成"参考实现"或"降级 fallback"；同时开一个 <strong>Collector SPI</strong>：<code>~/.coding-pet/collectors/*.toml</code>（或者更激进地直接是 shell/py 子进程，stdout 吐 JSON），社区能加 Aider / Cline / Cursor / Codex CLI 而不改 Go 代码。<strong>顺带修</strong> <code>TOOL_LABELS</code> bug：前端 <code>/api/collectors</code> 拉 manifest（label/icon/allowed states/context-tokens-cap），不再硬编码。</p>
+
+<div class="basis">
+<strong>Basis · direct.</strong> <code>internal/collector/codebuddy_ide.go:134</code> 「Linux 静默跳过」是 hard-coded collector 的直接代价；<code>internal/server/index.html:821-825</code> 缺少 <code>codebuddy_ide</code> 是硬编码的现存 bug；<code>internal/collector/jsonl.go:86-129</code> reverse-tail 逻辑 stuck inside 一个 collector。<strong>External.</strong> Claude Code 有 hooks API（<code>Notification / SubagentStop</code>）；MCP 的推广也在朝"每个 agent 用统一 wire 汇报"这个方向走。<strong>Reasoned.</strong> 现在每个新工具的支持成本是"读一遍它的私有磁盘格式 + 加个 collector.go + 在 index.html 里加 label"。发布一个小协议后，这个成本降到 "在你的 agent 里 curl 一下"。
+</div>
+
+<dl class="strip">
+  <dt>Rationale</dt><dd>把产品定位从"scrape 每家的 JSONL"变成"每家来我这里报到"。在 494 个 fleet 仓库的竞争里，谁先立住"多厂商中立的观测标准"，谁就是那个没人想 fork 的地基。副作用是彻底解掉 Linux IDE 支持——用户自己写 20 行 bash 就行。</dd>
+  <dt>Downsides</dt><dd>协议要谨慎，一旦发布就得管兼容性（<code>SessionInfo</code> 目前有 idle_ms/context_tokens/status/waiting_for，尚可）；一期即使发布也没有厂商会立刻接入，短期收益主要来自"自己写的 cron / Makefile / Python 脚本能进 dashboard"；Confidence 打 68% 是因为这个动作的短期回报最小、长期回报最大。</dd>
+</dl>
+<p><em>Meeting test.</em> "有人在 Aider 里加了 5 行 curl，就能看见它出现在 dashboard 上——完全没碰任何 <code>.go</code>。"</p>
+</article>
+
+<!-- Idea 5 -->
+<article class="idea" id="idea-5">
+<h3>5. 按项目/任务分组：机器降为元数据</h3>
+<div class="head-meta">
+  <span class="chip chip-axis">Cross-cutting: F3.3 + F5.8</span>
+  <span class="chip chip-conf">Confidence 78%</span>
+  <span class="chip chip-cx">Complexity S</span>
+</div>
+
+<p><strong>Description.</strong> 今天前端按 <code>machine_id</code> 分块。但当我在两台 laptop 上都跑 Claude Code 改 <code>payments/checkout</code> 时，它是"一件事"，不是"两台机器"。改成主轴 = <code>(git_repo, cwd, active_branch)</code>，机器名降级为卡片右上角的小 chip。前端在 12+ session 时可以再加一层「区首席」：以项目为分组头，头部显示分组最坏状态（"billing · 5 sessions, 1 等待审批"），点开展开。手机端只显示"首席层"，一眼扫完全部工作。<code>SessionInfo</code> 已经带 CWD，CodeBuddy IDE 里还用 <code>"Workspace Folder:"</code> 反查过，分组 key 免费。</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 240" role="img" aria-labelledby="idea5-title">
+<title id="idea5-title">按项目分组前后对比</title>
+<rect x="10" y="10" width="330" height="220" rx="6" fill="#fdfcf8" stroke="#e5e1d8" stroke-dasharray="4,3"/>
+<text x="175" y="30" text-anchor="middle" font-family="Inter" font-size="12" font-weight="600" fill="#6f6b64">今天：按 machine 分</text>
+<g font-family="Inter" font-size="10">
+  <rect x="30" y="45" width="130" height="50" rx="4" fill="#fff" stroke="#e5e1d8"/><text x="95" y="62" text-anchor="middle" font-weight="600">dev-01</text><text x="95" y="78" text-anchor="middle">payments · claude</text><text x="95" y="90" text-anchor="middle" fill="#8a5c00">waiting</text>
+  <rect x="180" y="45" width="130" height="50" rx="4" fill="#fff" stroke="#e5e1d8"/><text x="245" y="62" text-anchor="middle" font-weight="600">dev-02</text><text x="245" y="78" text-anchor="middle">payments · claude</text><text x="245" y="90" text-anchor="middle" fill="#2f6d2b">working</text>
+  <rect x="30" y="105" width="130" height="50" rx="4" fill="#fff" stroke="#e5e1d8"/><text x="95" y="122" text-anchor="middle" font-weight="600">dev-01</text><text x="95" y="138" text-anchor="middle">billing · codebuddy</text><text x="95" y="150" text-anchor="middle" fill="#2f6d2b">working</text>
+  <rect x="180" y="105" width="130" height="50" rx="4" fill="#fff" stroke="#e5e1d8"/><text x="245" y="122" text-anchor="middle" font-weight="600">dev-03</text><text x="245" y="138" text-anchor="middle">billing · workbuddy</text><text x="245" y="150" text-anchor="middle" fill="#2f6d2b">working</text>
+</g>
+<rect x="360" y="10" width="330" height="220" rx="6" fill="#fdfcf8" stroke="#b0490f"/>
+<text x="525" y="30" text-anchor="middle" font-family="Inter" font-size="12" font-weight="600" fill="#7a3208">改成：按项目分</text>
+<g font-family="Inter" font-size="10">
+  <rect x="380" y="45" width="290" height="70" rx="4" fill="#fdece0" stroke="#b0490f"/>
+  <text x="525" y="62" text-anchor="middle" font-weight="700">payments</text>
+  <text x="525" y="78" text-anchor="middle" fill="#8a5c00">1 等待 · 1 工作 (dev-01, dev-02)</text>
+  <rect x="395" y="85" width="60" height="20" rx="3" fill="#faedc9" stroke="#8a5c00"/><text x="425" y="99" text-anchor="middle" fill="#8a5c00">claude</text>
+  <rect x="465" y="85" width="60" height="20" rx="3" fill="#e3f0e0" stroke="#2f6d2b"/><text x="495" y="99" text-anchor="middle" fill="#2f6d2b">claude</text>
+  <rect x="380" y="125" width="290" height="70" rx="4" fill="#e3f0e0" stroke="#2f6d2b"/>
+  <text x="525" y="142" text-anchor="middle" font-weight="700">billing</text>
+  <text x="525" y="158" text-anchor="middle" fill="#2f6d2b">2 工作 (dev-01, dev-03)</text>
+</g>
+</svg>
+<figcaption>分组主轴从"机器"变成"项目"—— 相同的数据，一眼能看出「payments 有人在等」</figcaption>
+</figure>
+
+<div class="basis">
+<strong>Basis · direct.</strong> <code>internal/protocol/types.go:34-48</code> 里 <code>SessionInfo</code> 已经带 CWD；<code>internal/collector/codebuddy_ide.go</code> 的 <code>parseWorkspaceFolder</code>（<code>:283-295</code>）已经反查过工作区，可复用；<code>internal/server/index.html:820</code> 前后的 grid 布局全是硬编码的 machine 层级。<strong>Reasoned.</strong> 「多机 + Android」是你相对 494 个 fleet 仓库的稀缺护城河（外部研究）；但当前 UI 把机器放在最外层，恰恰把这个卖点埋起来了。三台机器都在改同一个 refactor，用户想看的是 refactor 的状态，不是"这台机器上有一个 session"重复三遍。
+</div>
+
+<dl class="strip">
+  <dt>Rationale</dt><dd>成本极低（前端排序 + 分组渲染），价值感极高（一眼扫 4 个项目 vs 一眼扫 17 个 tile）。也把 Android 端从"和桌面一样的小格子"变成天然的"首席层"—— 手机就应该只看 4 行。</dd>
+  <dt>Downsides</dt><dd>无 CWD 的 session（Claude Code 有时候是空的）需要 fallback 到"未分组"；用户手动指定分组的欲望以后会来（"这 3 个 session 是同一个功能不同分支"），先不做，靠 CWD 覆盖 80%。</dd>
+</dl>
+<p><em>Meeting test.</em> "手机上打开只看到 4 个项目卡，其中一个红了 —— 而不是 17 个 tile 里找那个红的。"</p>
+</article>
+
+<!-- Idea 6 -->
+<article class="idea" id="idea-6">
+<h3>6. 首条消息 Purpose 面包屑</h3>
+<div class="head-meta">
+  <span class="chip chip-axis">Single (F1.2)</span>
+  <span class="chip chip-conf">Confidence 92%</span>
+  <span class="chip chip-cx">Complexity S</span>
+</div>
+
+<p><strong>Description.</strong> 每张 session 卡片除了工具/状态/上下文 token，加一行副标题："refactor auth to JWT"、"fix flaky login test"。做法：<code>codebuddy_ide.go:283-295</code> 已经 grep 过第一条 user message 的开头（为了拿 <code>"Workspace Folder:"</code>），把同一次 read 顺手截取首句自然语言即可；CodeBuddy CLI 的 JSONL 头部有 messages[0]；WorkBuddy 有 <code>sessions.first_message</code>；Claude Code 的 session 目录里 <code>*.json</code> 有 <code>title</code> 字段。零新读、零 LLM、只加一个 <code>SessionInfo.Purpose string</code>。</p>
+
+<div class="basis">
+<strong>Basis · direct.</strong> <code>internal/collector/codebuddy_ide.go</code> 的 <code>parseWorkspaceFolder</code> 已经在 grep 首条 user message；<code>internal/protocol/types.go:34-48</code> 加字段无破坏性；<code>internal/server/index.html:720-724</code> 显示层加一行是纯 vanilla-JS。<strong>External.</strong> claude-fleet 的定位文案明确列出 "forgotten session purposes" 为它解决的用户痛点。<strong>Reasoned.</strong> 你手机屏幕上 8 张卡片，都写着 "claude / waiting / 74k tokens"—— 你根本不知道该管哪张。首句自然语言是最便宜的信息。
+</div>
+
+<dl class="strip">
+  <dt>Rationale</dt><dd>成本几乎为 0（一个字段 + 一个 grep + 一行前端），收益是"我知道 box-3 上那台在干什么"。Confidence 92% 是因为四个来源都已经有首句可读，几乎没有实现风险。</dd>
+  <dt>Downsides</dt><dd>隐私：首句可能包含敏感内容（客户名、API key），要有一个 <code>--no-purpose</code> flag；截断策略需要选（40 字够短、够扫）；对没有 user message 的空 session 要 fallback 到 "&lt;new session&gt;"。</dd>
+</dl>
+<p><em>Meeting test.</em> "手机上 8 张卡片，我一眼看出 box-3 是我 20 分钟前起的那个 refactor —— 而不是猜。"</p>
+</article>
+
+<!-- Idea 7 -->
+<article class="idea" id="idea-7">
+<h3>7. 主动 PAR 心跳：静默 Agent 告警</h3>
+<div class="head-meta">
+  <span class="chip chip-axis">Cross-cutting: F5.3</span>
+  <span class="chip chip-conf-med chip-conf" style="background:var(--warn-soft);color:var(--warn);">Confidence 72%</span>
+  <span class="chip chip-cx">Complexity M</span>
+</div>
+
+<p><strong>Description.</strong> 今天的判活是"90 秒没收到 <code>/api/report</code> 就 offline"——但 <em>agent daemon 活着、上报正常、里面挂着的 Claude CLI 却卡死了</em> 这种最讨厌的状态是看不出来的。借消防的 <strong>PAR（Personnel Accountability Report）</strong>思路：agent 侧每 60s 主动对每个 session 做一次「你还在吗」的可观测验证 —— 对 CodeBuddy CLI 是"最后一条 JSONL 行是否在合理窗口内"，对 Claude Code 是"进程存活 + 最近有 stdout/stderr 活动"，对 IDE 是"file mtime 是否移动"。三次 PAR 无响应 → 触发一个<strong>新的状态 <code>unresponsive_but_alive</code></strong>，不同颜色、不同响铃、不同 dispatcher（这是没有人来的告警，语义比 <code>waiting_for_input</code> 更急）。</p>
+
+<div class="basis">
+<strong>Basis · reasoned + direct.</strong> 现有 <code>internal/collector/claudecode.go:99-113</code> 只看 <code>status</code>/<code>waitingFor</code>，一旦 Claude CLI 自身 hang，<code>status</code> 就冻结在 <code>working</code>——90s→offline 完全触发不了；<code>internal/server/store.go:11-16</code> 的 offline 判定基于 machine 层（agent 上报中断），不是 session 层（工具进程停顿）。<strong>External.</strong> Claude CLI 挂起是社区里公认的现象（Warp/Ghostty 里的 OSC 通知也是为此而生）。消防的 PAR 是这类"沉默失败"的 canonical UX：区分「等我」和「无人回应」。<strong>Reasoned.</strong> 你今天有 <em>两个</em>失联信号（machine offline, session waiting）；引入 <em>第三个</em> —— session 静默但 agent 活着 —— 覆盖真实存在但目前隐形的失败模式。
+</div>
+
+<dl class="strip">
+  <dt>Rationale</dt><dd>「等你 30 分钟」和「卡死 30 分钟」是两种截然不同的用户体验 —— 一个是我的错，一个是工具的错。把它们分开，才知道该开新会话还是继续等。</dd>
+  <dt>Downsides</dt><dd>PAR 判定的假阳性成本高（错误的"你死了"通知会侵蚀信任），一期用保守窗口（3× 平均活动间隔）；对 WorkBuddy 这类无 PID 的工具没有干净的 PAR 通道，先跳过。Confidence 72% 是因为每个工具的"活性验证"信号不完全对称。</dd>
+</dl>
+<p><em>Meeting test.</em> "我的 Claude CLI 卡了 40 分钟没人告诉我 —— 现在 30s 内 coding-pet 就报了；而且它显然不是 waiting，是 dead。"</p>
+</article>
+
+<h2>Cross-Cutting Threads (未进 top 7 但值得留意)</h2>
+
+<div class="callout">
+<div class="eyebrow">Attention Model</div>
+<p>Frame 5 的三个想法（<em>Radiology STAT 分级</em>、<em>Sonar Ambient/Designated/Tracked 晋级</em>、<em>Chess flag-fall + board-order</em>）在骨子里是同一件事：不是所有 session 都同等重要。可以叠加成一个未来的"注意力模型"—— 每个 session 有 tier + 自声明回复预算 + 项目排序。今天先不做，等 Idea 5（按项目分组）落地后自然浮现。</p>
+</div>
+
+<div class="callout">
+<div class="eyebrow">Local History / Flight Recorder</div>
+<p>Idea 2 的 event bus 已经天然带上了 24h 回放能力；如果再落一份 WAL 到 <code>~/.coding-pet/events.jsonl</code>，就有了 <em>「昨晚发生了什么」</em>的能力。当社区最爱问的 "为什么这个 session 突然停了" 反复出现时，这个 WAL 就该开。可以先放着，工作量极小。</p>
+</div>
+
+<div class="callout">
+<div class="eyebrow">Morning Digest</div>
+<p>如果有了历史（上一条），可以在 Android 端做一个"早晨第一次解锁"的 briefing 卡：过去 12h 里哪些 session 等待最久、哪些烧了最多 token、哪些卡死过。比一晚上叮叮咚咚推送更符合"睡了一觉再来处理"的实际节奏。</p>
+</div>
+
+<h2>Rejection Summary</h2>
+
+<table>
+<thead><tr><th>#</th><th>被淘汰的想法</th><th>原因</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>并行 collector + per-source timeout + last-known-good</td><td>与 Idea 2 的 event bus 重叠 —— fsnotify + 事件流让顺序采集变得无所谓</td></tr>
+<tr><td>2</td><td>统一 zombie/idle/waiting reducer 抽象</td><td>抽象成本高、当前 4 个 collector 状态判定还在演进，避免早期过度抽象</td></tr>
+<tr><td>3</td><td>CodeBuddy IDE Linux 支持</td><td>bounded bug fix；应进 issue tracker，不该占 ideation slot</td></tr>
+<tr><td>4</td><td>Go 侧 selfupdate 加"skip this version"</td><td>与 Android 对齐即可，一天的小活；未过 meeting-test</td></tr>
+<tr><td>5</td><td>Maintainer 破窗一扫（TOOL_LABELS/nohup.out/binaries/AGENT_INTERVAL）</td><td>tactical polish；未过 meeting-test（不值团队讨论，直接开 PR）</td></tr>
+<tr><td>6</td><td>fsnotify-driven collectors + SSE</td><td>部分并入 Idea 2；单独提无必要</td></tr>
+<tr><td>7</td><td>YAML-defined session source schema</td><td>并入 Idea 4（Collector SPI）；直接 subprocess 更 pragmatic</td></tr>
+<tr><td>8</td><td>Dashboard 反过来"看你"（Android brightness → 注意力信号）</td><td>创意迷人但检测精度低（brightness ≠ attention），信噪比堪忧</td></tr>
+<tr><td>9</td><td><code>agent install</code> 自 daemon 化</td><td>onboarding polish；重要但未突破，先修 <code>restart.sh</code> 的 bug 更划算</td></tr>
+<tr><td>10</td><td>Server 权威 taxonomy（自动派发 tool label/order/icon）</td><td>并入 Idea 4 的 <code>/api/collectors</code> manifest</td></tr>
+<tr><td>11</td><td>把 update check piggyback 到 <code>/api/report</code></td><td>与 Idea 2 event bus 天然融合；不需要单独 ideation slot</td></tr>
+<tr><td>12</td><td>Fire-immediately + retract on flap</td><td>并入 Idea 3 的升级阶梯（作为"5s 撤回"细节实现）</td></tr>
+<tr><td>13</td><td>QR-code 分发/onboarding</td><td>成长功能而非核心突破；等 Idea 4 的 ARP 立起来后再谈</td></tr>
+<tr><td>14</td><td>$/decision-per-hour（价值速度）</td><td>思路精彩但需要评分策略（token 花费 vs 编辑落地），代码里没有现成的信号；deferred exploration</td></tr>
+<tr><td>15</td><td>队列 UI 替代 grid</td><td>与 Idea 5（项目分组）+ Idea 3（升级阶梯的 top-of-list）部分重叠</td></tr>
+<tr><td>16</td><td>合并为单 <code>coding-pet</code> 二进制（personal mode）</td><td>packaging 优化；对 multi-machine 主打的品牌反倒是稀释</td></tr>
+<tr><td>17</td><td>Hot-config bus 统一 primitive</td><td>并入 Idea 3（规则引擎复用同一底座）</td></tr>
+<tr><td>18</td><td>Selfupdate 变成 artifact bus（非二进制资源）</td><td>有长尾价值但优先级低；先把主线通道跑通</td></tr>
+<tr><td>19</td><td>Machine-id federation（peer_url）</td><td>对当前"单人多机"用户群过于遥远</td></tr>
+<tr><td>20</td><td>Detector 事件总线</td><td>并入 Idea 2</td></tr>
+<tr><td>21</td><td>Manifest-driven frontend</td><td>并入 Idea 4</td></tr>
+<tr><td>22</td><td>Radiology STAT 工作列表</td><td>合并到 Attention Model 跨主题线</td></tr>
+<tr><td>23</td><td>ATC flight strip / sector handoff</td><td>当前是单人产品；handoff 语义要等团队场景落地</td></tr>
+<tr><td>24</td><td>KDS bump bar 批量审批</td><td>大部分融入 Idea 1（一键 approve 是 batch 模式的前置）</td></tr>
+<tr><td>25</td><td>Dairy-farm 早晨清单（08:00 digest）</td><td>合并到 Local History / Flight Recorder 线</td></tr>
+<tr><td>26</td><td>Sonar Ambient / Designated / Tracked</td><td>合并到 Attention Model 线</td></tr>
+<tr><td>27</td><td>Chess flag-fall + board-order</td><td>合并到 Attention Model 线；部分吸收进 Idea 3</td></tr>
+<tr><td>28</td><td>Flight Recorder mode</td><td>合并到 Local History 线（Idea 2 已带 24h 回放）</td></tr>
+<tr><td>29</td><td>Ten-year semantic archive</td><td>Idea 2 已经天然带 24h；十年是遥远的推演，不作独立方向</td></tr>
+<tr><td>30</td><td>Anonymous crowdsourced baselines</td><td>隐私敏感（Warp 舆情前车之鉴）；opt-in SaaS 与项目当前定位不符</td></tr>
+<tr><td>31</td><td>Subprocess collectors（<code>~/.coding-pet/collectors/*.sh</code>）</td><td>并入 Idea 4 的 SPI 层</td></tr>
+<tr><td>32</td><td>自主批准器（策略学习）</td><td>Idea 1 的一键回复覆盖了 90%；自主学习是下一阶段</td></tr>
+<tr><td>33</td><td>连续语音叙述（蓝牙耳机播报）</td><td>有趣但偏离主产品；离项目当前主线太远</td></tr>
+<tr><td>34</td><td>No server no agent（浏览器直读本地文件）</td><td>Subject-replacement：牺牲多机能力，抹掉品牌护城河</td></tr>
+</tbody>
+</table>
+
+<footer class="composition-signal">
+Composed 2026-07-13 by ce-ideate · surprise-me mode · Sources: <code>/data/home/simonlei/coding-pet</code> repo scan + Phase-1 web research (claude-fleet, claude-code-agent-farm, Cursor Cloud, Extendo, Andon)
+</footer>
+
+</body>
+</html>
