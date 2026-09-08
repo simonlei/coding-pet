@@ -294,8 +294,14 @@ func TestMapCodeBuddyIDERemoteState(t *testing.T) {
 			include: true,
 		},
 		{
-			name:    "3min~30min 无 log 活动 → waiting_for_input(降级,不看 run 边沿)",
+			name:    "open run 长静默(lastSeen 超 3min 但 run start>run end) → active(保活优先)",
 			ev:      convEventState{lastSeenMs: now - 10*oneMin, latestRunStartMs: now - 10*oneMin},
+			want:    protocol.StateActive,
+			include: true,
+		},
+		{
+			name:    "open run 但非归属者(lastSeen 距 run start > 60s)且超 3min → waiting_for_input",
+			ev:      convEventState{lastSeenMs: now - 10*oneMin, latestRunStartMs: now - 30_000, latestRunEndMs: 0},
 			want:    protocol.StateWaitingForInput,
 			include: true,
 		},

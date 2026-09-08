@@ -473,8 +473,29 @@ func mapCodeBuddyIDERemoteState(ev convEventState, currentJsonMtimeMs, nowMs int
 	if ageMs >= staleMs {
 		return "", false
 	}
+	// open run 保活优先于"3min 无活动降级":模型长静默生成 / 长 tool call 期间,conv 可能
+	// 好几分钟不写含 conv id 的日志(只有被忽略的 UI 事件),此时 lastSeen 停摆,但
+	// [BaseAgent:craft] run start 之后还没有 run end —— 这是"正在跑"的强信号,不该被误
+	// 降级成 waiting_for_input。
+	//
+	// 归属复用 runAssociationWindowMs:发起 run 的 conv 在 run start 时刻必有 lastSeen 刷新
+	// (真实 log 里 run start 前后几 ms 内就有 conversationId 事件),静默期 lastSeen 与
+	// latestRunStartMs 双双冻结、差值恒定很小仍 ≤60s;非归属者(别的 workspace 在跑)差值
+	// 远超 60s,不会误判 active。
+	if ev.lastSeenMs != 0 {
+		latestRun := ev.latestRunStartMs
+		if ev.latestRunEndMs > latestRun {
+			latestRun = ev.latestRunEndMs
+		}
+		if latestRun != 0 &&
+			ev.latestRunStartMs > ev.latestRunEndMs &&
+			absMs(ev.lastSeenMs, latestRun) <= runAssociationWindowMs {
+			return protocol.StateActive, true
+		}
+	}
+
 	if ageMs >= activeMs {
-		// 3–30min:降级为等待,不看 run 边沿。
+		// 3–30min:无 open run 保活 → 降级为等待。
 		return protocol.StateWaitingForInput, true
 	}
 
