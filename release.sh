@@ -58,6 +58,10 @@ if [[ "$with_android" -eq 1 ]]; then
 fi
 echo "remote:    ${remote}"
 
+# 先把当前代码推送到 remote，再打 tag
+git push "${remote}" HEAD
+echo "已推送当前代码到 ${remote}"
+
 git tag "${next}"
 if [[ "$with_android" -eq 1 ]]; then
   git tag "${android_next}"
