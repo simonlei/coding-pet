@@ -245,25 +245,25 @@ func TestMapCodeBuddyIDERemoteState(t *testing.T) {
 	}{
 		{
 			name:    "log tail 有 run start 且 > run end + tied → active(正在跑)",
-			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: now - 30_000, latestRunEndMs: now - 5*oneMin},
+			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: now - 30_000, latestRunEndMs: now - 5*oneMin, isRunOwner: true},
 			want:    protocol.StateActive,
 			include: true,
 		},
 		{
 			name:    "run end > run start + tied → waiting_for_input(一轮已完成)",
-			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: now - 2*oneMin, latestRunEndMs: now - 30_000},
+			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: now - 2*oneMin, latestRunEndMs: now - 30_000, isRunOwner: true},
 			want:    protocol.StateWaitingForInput,
 			include: true,
 		},
 		{
 			name:    "只有 run end 无 run start + tied → waiting_for_input",
-			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: 0, latestRunEndMs: now - 30_000},
+			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: 0, latestRunEndMs: now - 30_000, isRunOwner: true},
 			want:    protocol.StateWaitingForInput,
 			include: true,
 		},
 		{
 			name:    "run end 之后 cleanup 事件刷新 lastSeen 但仍在 60s 内 → tied → waiting_for_input",
-			ev:      convEventState{lastSeenMs: now - 10_000, latestRunStartMs: now - 60_000, latestRunEndMs: now - 60_000},
+			ev:      convEventState{lastSeenMs: now - 10_000, latestRunStartMs: now - 60_000, latestRunEndMs: now - 60_000, isRunOwner: true},
 			want:    protocol.StateWaitingForInput,
 			include: true,
 		},
@@ -275,7 +275,7 @@ func TestMapCodeBuddyIDERemoteState(t *testing.T) {
 		},
 		{
 			name:    "log tail 无 run 事件但 conv 3min 内有活动 → active(保守,run 早于 tail)",
-			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: 0, latestRunEndMs: 0},
+			ev:      convEventState{lastSeenMs: now - 30_000, latestRunStartMs: 0, latestRunEndMs: 0, isRunOwner: true},
 			want:    protocol.StateActive,
 			include: true,
 		},
@@ -295,7 +295,7 @@ func TestMapCodeBuddyIDERemoteState(t *testing.T) {
 		},
 		{
 			name:    "open run 长静默(lastSeen 超 3min 但 run start>run end) → active(保活优先)",
-			ev:      convEventState{lastSeenMs: now - 10*oneMin, latestRunStartMs: now - 10*oneMin},
+			ev:      convEventState{lastSeenMs: now - 10*oneMin, latestRunStartMs: now - 10*oneMin, isRunOwner: true},
 			want:    protocol.StateActive,
 			include: true,
 		},
@@ -303,6 +303,12 @@ func TestMapCodeBuddyIDERemoteState(t *testing.T) {
 			name:    "open run 但非归属者(lastSeen 距 run start > 60s)且超 3min → waiting_for_input",
 			ev:      convEventState{lastSeenMs: now - 10*oneMin, latestRunStartMs: now - 30_000, latestRunEndMs: 0},
 			want:    protocol.StateWaitingForInput,
+			include: true,
+		},
+		{
+			name:    "open run 但 lastSeen 远超 runStart(长 run 持续产生活动 > 60s) → 仍归属 active",
+			ev:      convEventState{lastSeenMs: now - 10_000, latestRunStartMs: now - 5*oneMin, latestRunEndMs: 0, isRunOwner: true},
+			want:    protocol.StateActive,
 			include: true,
 		},
 		{
@@ -381,6 +387,57 @@ func TestCollectCodeBuddyIDERemote_OpenRunActive(t *testing.T) {
 	}
 	if s := sessions[0]; s.State != protocol.StateActive {
 		t.Errorf("state = %q, want active (主 agent run 未结束)", s.State)
+	}
+}
+
+// TestCollectCodeBuddyIDERemote_LongRunningOpenRunActive 复现用户观察的场景:
+// 单 workspace 下主 agent run start 在 tail 内、且距今已远超 60s(长 tool call / 长生成),
+// 期间 conv 持续产出 agent 活动(lastSeen 不断前移)但 run 仍未 end → 应识别为 active,
+// 不能被误判成 waiting_for_input。
+func TestCollectCodeBuddyIDERemote_LongRunningOpenRunActive(t *testing.T) {
+	root := t.TempDir()
+	conv := "9adbf70b8c264edc8484256a49c20820"
+
+	genieBase := filepath.Join(root, "data", "User", "globalStorage",
+		"tencent-cloud.coding-copilot", "genie-history")
+	wsDir := filepath.Join(genieBase, "L2RhdGEvY3JodWI_") // "/data/crhub"
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, "current.json"),
+		[]byte(`{"conversationId":"`+conv+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	logDir := filepath.Join(root, "data", "logs", "20260722T151156",
+		"exthost3", "Tencent-Cloud.coding-copilot")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(logDir, chatLogBaseName)
+
+	now := time.Now()
+	fmtTs := func(off time.Duration) string {
+		return now.Add(off).Format("2006-01-02 15:04:05.000")
+	}
+	// run start 在 5min 前，之后一直有 conv 活动（lastSeen 前移到 10s 前），run 仍未 end。
+	logContent := "" +
+		fmtTs(-5*time.Minute) + " [info] [BaseAgent:craft] run start\n" +
+		fmtTs(-4*time.Minute) + " [info] [AcpAgent:" + conv + "] tool executing\n" +
+		fmtTs(-2*time.Minute) + " [info] [ToolManager] 开始执行: call_long - execute_command\n" +
+		fmtTs(-30*time.Second) + " [info] [AcpAgent:" + conv + "] tool executing\n" +
+		fmtTs(-10*time.Second) + " [info] [ChatService] onConversationUpdated: conversationId=" + conv + ", fields=lastMessageAt\n"
+
+	if err := os.WriteFile(logPath, []byte(logContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions := collectCodeBuddyIDERemoteFromRoot(root, now.UnixMilli())
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1 (dump: %+v)", len(sessions), sessions)
+	}
+	if s := sessions[0]; s.State != protocol.StateActive {
+		t.Errorf("state = %q, want active (长 run 未结束,lastSeen 已远超 runStart)", s.State)
 	}
 }
 

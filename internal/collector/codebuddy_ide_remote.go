@@ -57,12 +57,6 @@ const (
 	cbIDERemoteActiveWindow = 3 * time.Minute
 	// cbIDERemoteStaleWindow：任何会话超过此窗口无写盘 → 剔除。
 	cbIDERemoteStaleWindow = 30 * time.Minute
-	// runAssociationWindowMs：将 conv 的清理/心跳事件归属到邻近 run 边沿的时间窗口。
-	// exthost 是单线程 JS，run 期间会持续输出该 conv 的关联事件；run 结束后 IDE 会
-	// 写一批 cleanup 事件（也带 conv id），并容忍多 workspace 切换粒度。60s 窗口因此
-	// 既用于把 run 结束后的 cleanup 尾巴归属到邻近的 run 边沿，也远大于 conv 切换粒度，
-	// 切勿仅为"清理尾巴"而调小此值，否则会同时破坏跨 conv 的归属判定。
-	runAssociationWindowMs = 60_000
 	// remoteLogTailBytes：从日志尾部读取的字节数。多次 run 的关键事件都在最后几十 KB 内。
 	remoteLogTailBytes = 256 * 1024
 	// chatLogBaseName：扩展写入的对话 log 文件名（含中文）。测试与实现共用同一常量。
@@ -82,6 +76,7 @@ type convEventState struct {
 	lastSeenMs       int64 // conv id 在 log 中最后出现的时间（用于判活/stale，忽略纯 UI 事件）
 	latestRunStartMs int64 // 最新一次主 agent (mainAgentTag) run start 时间（全局）
 	latestRunEndMs   int64 // 最新一次主 agent run end 时间（全局）
+	isRunOwner       bool  // 该 conv 是否全局最新 run 的归属者（lastSeen 全局最新）
 }
 
 // CollectCodeBuddyIDERemoteSessions 扫描本机 ~/.codebuddy-server-cn，为每个远程 workspace
@@ -114,6 +109,18 @@ func collectCodeBuddyIDERemoteFromRoot(root string, nowMs int64) []protocol.Sess
 	// 单次扫 log tail：提取全局最新 mainAgent run start/end 以及每个 convID 的 lastSeen。
 	latestRunStartMs, latestRunEndMs, convLastSeen := scanLogTail(logTail)
 
+	// 归属者 = log tail 里 lastSeen 全局最新的 conv。exthost 单线程一次只有一个 conv 在
+	// 活跃，因此最近活跃的 conv 就是驱动最新 run 的 conv。用"最近活跃"而非"距 run start
+	// 60s 内"判定归属，才能覆盖长 run（lastSeen 持续前移、与 run start 差值远超 60s）场景。
+	ownerID := ""
+	var ownerSeenMs int64
+	for id, seen := range convLastSeen {
+		if seen > ownerSeenMs {
+			ownerSeenMs = seen
+			ownerID = id
+		}
+	}
+
 	var out []protocol.SessionInfo
 	for _, ws := range workspaces {
 		lastSeen := convLastSeen[ws.conversationID]
@@ -121,6 +128,7 @@ func collectCodeBuddyIDERemoteFromRoot(root string, nowMs int64) []protocol.Sess
 			lastSeenMs:       lastSeen,
 			latestRunStartMs: latestRunStartMs,
 			latestRunEndMs:   latestRunEndMs,
+			isRunOwner:       ws.conversationID == ownerID,
 		}
 
 		state, include := mapCodeBuddyIDERemoteState(st, ws.currentMtimeMs, nowMs)
@@ -445,14 +453,15 @@ func isAllDigits(s string) bool {
 // mapCodeBuddyIDERemoteState 用 (log 事件摘要 + current.json mtime + now) 推断 remote session 状态。
 //
 // 核心思路:多 workspace 场景下同一个 log 混合多个 conv 的事件,exthost 单线程一次只有
-// 一个 conv 在活跃。"最新一次 run" 只归属给邻近有活动的那个 conv;非归属者用自身活跃度
+// 一个 conv 在活跃。"最新一次 run" 只归属给全局最近活跃的那个 conv(即 isRunOwner,
+// 由 collectCodeBuddyIDERemoteFromRoot 按 lastSeen 最新者确定);非归属者用自身活跃度
 // 单独判定。
 //
-//   - 该 conv 的 lastSeen 距最新 run 事件 ≤ 60s → 该 conv 是最新 run 的归属者（60s 窗口
-//     用于把 run 结束后的 cleanup/心跳事件归属到邻近的 run 边沿，并容忍多 workspace 切换粒度）
-//     · runStart > runEnd     → active（当前有 open run）
-//     · runEnd  ≥ runStart    → waiting_for_input（run 已结束；后续 cleanup 事件也在此窗内）
-//   - 该 conv lastSeen 距最新 run 事件 > 60s → 不归属最新 run:
+//   - isRunOwner && runStart > runEnd → active（该 conv 正驱动一个 open run，无论 lastSeen
+//     距 run start 多远——长 tool call / 长生成期间 lastSeen 会持续前移，与 run start 的
+//     差值远超 60s，不能用对称窗口判定归属）
+//   - isRunOwner && runEnd ≥ runStart → waiting_for_input（一轮已完成；后续 cleanup 事件也在此窗内）
+//   - 非归属者:
 //     · lastSeen 3min 内     → waiting_for_input（自己之前完成过一轮）
 //     · 3–30min              → waiting_for_input(降级)
 //     · ≥30min               → 剔除
@@ -473,25 +482,15 @@ func mapCodeBuddyIDERemoteState(ev convEventState, currentJsonMtimeMs, nowMs int
 	if ageMs >= staleMs {
 		return "", false
 	}
+
 	// open run 保活优先于"3min 无活动降级":模型长静默生成 / 长 tool call 期间,conv 可能
 	// 好几分钟不写含 conv id 的日志(只有被忽略的 UI 事件),此时 lastSeen 停摆,但
 	// [BaseAgent:craft] run start 之后还没有 run end —— 这是"正在跑"的强信号,不该被误
-	// 降级成 waiting_for_input。
-	//
-	// 归属复用 runAssociationWindowMs:发起 run 的 conv 在 run start 时刻必有 lastSeen 刷新
-	// (真实 log 里 run start 前后几 ms 内就有 conversationId 事件),静默期 lastSeen 与
-	// latestRunStartMs 双双冻结、差值恒定很小仍 ≤60s;非归属者(别的 workspace 在跑)差值
-	// 远超 60s,不会误判 active。
-	if ev.lastSeenMs != 0 {
-		latestRun := ev.latestRunStartMs
-		if ev.latestRunEndMs > latestRun {
-			latestRun = ev.latestRunEndMs
-		}
-		if latestRun != 0 &&
-			ev.latestRunStartMs > ev.latestRunEndMs &&
-			absMs(ev.lastSeenMs, latestRun) <= runAssociationWindowMs {
-			return protocol.StateActive, true
-		}
+	// 降级成 waiting_for_input。归属由 isRunOwner(全局最近活跃 conv)判定,而非 lastSeen
+	// 距 run start 的对称 60s 窗口:长 run 里 lastSeen 持续前移,对称窗口会把它错判成
+	// 非归属者。
+	if ev.isRunOwner && ev.latestRunStartMs > ev.latestRunEndMs {
+		return protocol.StateActive, true
 	}
 
 	if ageMs >= activeMs {
@@ -515,23 +514,12 @@ func mapCodeBuddyIDERemoteState(ev convEventState, currentJsonMtimeMs, nowMs int
 		return protocol.StateActive, true
 	}
 
-	// 判断该 conv 是否归属最新 run:lastSeen 距最新 run 事件 ≤ 60s。
-	tied := absMs(ev.lastSeenMs, latestRun) <= runAssociationWindowMs
-	if tied {
-		if ev.latestRunStartMs > ev.latestRunEndMs {
-			return protocol.StateActive, true
-		}
+	// 归属者且最新 run 已结束(run end ≥ run start) → waiting_for_input。
+	if ev.isRunOwner {
 		return protocol.StateWaitingForInput, true
 	}
 
 	// 非归属者:该 conv 自身 3min 内有活动但与最新 run 无关(自己之前跑过一轮,或多 workspace
 	// 场景下另一个 conv 正在跑),判 waiting_for_input。
 	return protocol.StateWaitingForInput, true
-}
-
-func absMs(a, b int64) int64 {
-	if a > b {
-		return a - b
-	}
-	return b - a
 }
