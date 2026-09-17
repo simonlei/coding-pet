@@ -38,14 +38,21 @@ func lastRunState(sessionID string) string {
 // lastRunStateIn 在指定 agent home 的 logs/<date>/*.log 中查找该 session
 // 最后一条状态机 transition 的目标状态。找不到时返回空串。
 func lastRunStateIn(baseDir, sessionID string) string {
+	state, _ := lastRunStateInWithSource(baseDir, sessionID)
+	return state
+}
+
+// lastRunStateInWithSource 与 lastRunStateIn 同逻辑，额外返回命中的日志文件路径，
+// 供诊断输出（让人能直接去 grep 那个文件核对）。
+func lastRunStateInWithSource(baseDir, sessionID string) (state, source string) {
 	if sessionID == "" {
-		return ""
+		return "", ""
 	}
 	logsRoot := filepath.Join(baseDir, "logs")
 
 	files, err := filepath.Glob(filepath.Join(logsRoot, "*", "*.log"))
 	if err != nil || len(files) == 0 {
-		return ""
+		return "", ""
 	}
 
 	// 按 mtime 从新到旧排序，优先扫最新文件；命中即返回。
@@ -66,10 +73,10 @@ func lastRunStateIn(baseDir, sessionID string) string {
 	needle := []byte(sessionID)
 	for _, fm := range mods {
 		if state := lastRunStateInFile(fm.path, needle); state != "" {
-			return state
+			return state, fm.path
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // runningRunStates 是运行日志中表示「session 正在执行」的状态机状态集合。
