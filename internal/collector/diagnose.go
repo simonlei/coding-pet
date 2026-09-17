@@ -86,7 +86,7 @@ func noteForTool(t protocol.SessionTool) string {
 	case protocol.ToolCodeBuddyIDE:
 		return "CodeBuddy IDE：状态取自扩展 SQLite(state.vscdb) 的 session 值 + MQ runtime，不读 JSONL/运行日志"
 	case protocol.ToolCodeBuddyIDERemote:
-		return "CodeBuddy IDE 远程：状态取自 exthost 日志的 run start/end 配对，不读 JSONL/运行日志"
+		return "CodeBuddy IDE 远程：状态取自各 exthost 日志的 run start/end 配对 + 用户确认请求（user_confirm_required / Permission response），不读 JSONL/运行日志"
 	case protocol.ToolWorkBuddy:
 		return "WorkBuddy：状态直读 ~/.workbuddy/workbuddy.db 的 sessions.status 字段"
 	default:

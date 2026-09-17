@@ -60,10 +60,10 @@ func TestParseLogLineTimestamp(t *testing.T) {
 	refNoMs := time.Date(2026, 7, 23, 16, 32, 6, 0, loc).UnixMilli()
 
 	cases := []struct {
-		name    string
-		in      string
-		wantMs  int64
-		wantOK  bool
+		name   string
+		in     string
+		wantMs int64
+		wantOK bool
 	}{
 		{
 			name:   "带毫秒的 info 行",
@@ -167,7 +167,7 @@ func TestScanLogTail(t *testing.T) {
 		"2026-07-23 16:32:34.301 [info] [BaseAgent:craft] run end\n" +
 		"2026-07-23 16:33:00.000 [info] [AcpMessageRouter:" + convB + "] some event\n"
 
-	rsMs, reMs, seen := scanLogTail([]byte(log))
+	rsMs, reMs, seen, _ := scanLogTail([]byte(log), nil)
 
 	wantRS := time.Date(2026, 7, 23, 16, 32, 6, 113_000_000, time.Local).UnixMilli()
 	wantRE := time.Date(2026, 7, 23, 16, 32, 34, 301_000_000, time.Local).UnixMilli()
@@ -200,9 +200,25 @@ func TestScanLogTail_IgnoresToolAndSubagent(t *testing.T) {
 		"2026-07-24 09:15:34.500 [info] [BaseAgent:code-explorer] run end\n" +
 		"2026-07-24 09:15:39.885 [info] [ToolManager] 开始执行: call_00_8XOSkRr - write_to_file - stream\n"
 
-	rsMs, reMs, _ := scanLogTail([]byte(log))
+	rsMs, reMs, _, _ := scanLogTail([]byte(log), nil)
 	if rsMs != 0 || reMs != 0 {
 		t.Errorf("start=%d end=%d, want both 0 (无 [BaseAgent:craft] run 事件)", rsMs, reMs)
+	}
+}
+
+// TestScanLogTail_SkipsTerminalEcho 终端回显会把别的会话的日志整段写进来（含 conv id 与
+// run 事件原文），这类行必须整行跳过，否则 lastSeen 会被别的会话刷新。
+func TestScanLogTail_SkipsTerminalEcho(t *testing.T) {
+	conv := "6b278c9a78394489a649f77ee134a142"
+	log := "" +
+		"2026-07-24 09:30:00.000 [info] [AcpAgent:" + conv + "] real agent activity\n" +
+		"2026-07-24 09:31:00.000 [info] [StandaloneTerminalProcess] [StandaloneTerminal][ChunkDebug][stdout#1] decodedPreview=2026-07-24 09:30:59.000 [info] [AcpAgent:" + conv + "] echoed\n"
+
+	_, _, seen, _ := scanLogTail([]byte(log), nil)
+
+	wantSeen := time.Date(2026, 7, 24, 9, 30, 0, 0, time.Local).UnixMilli()
+	if seen[conv] != wantSeen {
+		t.Errorf("seen[conv] = %d, want %d (终端回显不应刷新 lastSeen)", seen[conv], wantSeen)
 	}
 }
 
@@ -218,7 +234,7 @@ func TestScanLogTail_SkipsChatInputDraft(t *testing.T) {
 		"2026-07-24 09:35:01.000 [info] [ConfigService] update config: key=chatInputDraft:" + conv + ", value=[{\"text\":\"he\"}]\n" +
 		"2026-07-24 09:35:02.000 [info] [ConfigService] update config: key=chatInputDraft:" + conv + ", value=[{\"text\":\"hel\"}]\n"
 
-	_, reMs, seen := scanLogTail([]byte(log))
+	_, reMs, seen, _ := scanLogTail([]byte(log), nil)
 
 	wantEnd := time.Date(2026, 7, 24, 9, 30, 5, 0, time.Local).UnixMilli()
 	wantSeen := time.Date(2026, 7, 24, 9, 30, 0, 0, time.Local).UnixMilli()
@@ -449,9 +465,9 @@ func TestCollectCodeBuddyIDERemote_Integration(t *testing.T) {
 	root := t.TempDir()
 
 	// --- 1. 构造两个 workspace 指针 ---
-	convActive := "aaaa1111bbbb2222cccc3333dddd4444"   // 有 run 在跑
-	convDone := "eeee5555ffff66667777888899990000"     // 一轮已完成
-	convNoLog := "1234567890abcdef1234567890abcdef"    // 新建但 log 里没事件
+	convActive := "aaaa1111bbbb2222cccc3333dddd4444" // 有 run 在跑
+	convDone := "eeee5555ffff66667777888899990000"   // 一轮已完成
+	convNoLog := "1234567890abcdef1234567890abcdef"  // 新建但 log 里没事件
 
 	genieBase := filepath.Join(root, "data", "User", "globalStorage",
 		"tencent-cloud.coding-copilot", "genie-history")
@@ -573,5 +589,386 @@ func TestCollectCodeBuddyIDERemote_NoServerRoot(t *testing.T) {
 	sessions := collectCodeBuddyIDERemoteFromRoot(nonExistent, time.Now().UnixMilli())
 	if sessions != nil {
 		t.Errorf("want nil, got %+v", sessions)
+	}
+}
+
+// ---------- 等待权限确认（waiting_for_approval） ----------
+
+// TestScanApprovalSignals 从 log tail 里解出「请求用户确认」与「确认已结束（答复/超时）」
+// 两条时间线。样本取自真实 exthost 日志（2026-09-17 本机构 2165ef02 会话）。
+func TestScanApprovalSignals(t *testing.T) {
+	conv := "2165ef02a3a045ea9a95c4970ec82903"
+	base := time.Date(2026, 9, 17, 11, 8, 30, 0, time.Local)
+	ts := func(sec int) string {
+		return base.Add(time.Duration(sec) * time.Second).Format("2006-01-02 15:04:05.000")
+	}
+
+	cases := []struct {
+		name     string
+		log      string
+		wantAsk  int64
+		wantDone int64
+	}{
+		{
+			name: "危险命令 → 等待用户确认 → 上报权限请求，无人答复 → 待确认",
+			log: ts(0) + " [info] [TerminalExecutor] [SafetyRule] Dangerous command detected: rm -rf /tmp/x\n" +
+				ts(0) + " [info] [TerminalExecutor] requiredApprove: false, needUserConfirm: true, fromHook: undefined\n" +
+				ts(0) + " [info] [TerminalExecutor] emit event: user_confirm_required\n" +
+				ts(0) + " [info] [ToolManager] 请求用户确认: toolu_01Kfs - execute_command - execute\n" +
+				ts(0) + " [info] [AcpAgent:" + conv + "] HTTP fallback: reporting permission request to https://copilot.tencent.com/v2/x\n",
+			wantAsk:  base.UnixMilli(),
+			wantDone: 0,
+		},
+		{
+			name: "用户批准 → 确认结束",
+			log: ts(0) + " [info] [TerminalExecutor] emit event: user_confirm_required\n" +
+				ts(1) + " [info] [AcpAgent:" + conv + "] Permission response: approved=true, alwaysApprove=undefined, isSkip=undefined, source=terminal\n",
+			wantAsk:  base.UnixMilli(),
+			wantDone: base.Add(time.Second).UnixMilli(),
+		},
+		{
+			name: "用户拒绝 → 确认结束",
+			log: ts(0) + " [info] [TerminalExecutor] [beforeExecute] Permission decision: source=safety_rule_ask, allowed=true, needConfirm=true\n" +
+				ts(2) + " [info] [AcpAgent:" + conv + "] Permission response: approved=false, alwaysApprove=undefined, source=terminal\n",
+			wantAsk:  base.UnixMilli(),
+			wantDone: base.Add(2 * time.Second).UnixMilli(),
+		},
+		{
+			name: "权限请求超时 → 视为结束（不是用户拒绝，但阻塞已解除）",
+			log: ts(0) + " [info] [TerminalExecutor] [beforeExecute] Permission decision: source=safety_rule_ask, allowed=true, needConfirm=true\n" +
+				ts(300) + " [warning] [AcpAgent:" + conv + "] requestPermission timed out after 300000ms, treating as unanswered (NOT a user rejection)\n" +
+				ts(300) + " [info] [TerminalExecutor] [onCancelled], reason: Permission request timed out with no user response (the approval prompt may not have been visible). This was NOT an explicit user rejection.\n",
+			wantAsk:  base.UnixMilli(),
+			wantDone: base.Add(300 * time.Second).UnixMilli(),
+		},
+		{
+			name:     "needConfirm=false 自动放行不算请求确认",
+			log:      ts(0) + " [info] [Tool:read_file] [beforeExecute] Permission decision: source=default_allow, allowed=true, needConfirm=false\n",
+			wantAsk:  0,
+			wantDone: 0,
+		},
+		{
+			name:     "Hook registered / Auto-execute 等噪音行不算请求确认",
+			log:      ts(0) + " [info] [TerminalExecutor] [PermissionEngine] Hook registered, deferring permission decision to beforeExecute\n",
+			wantAsk:  0,
+			wantDone: 0,
+		},
+		{
+			name:     "无任何权限事件",
+			log:      ts(0) + " [info] [BaseAgent:craft] run start\n",
+			wantAsk:  0,
+			wantDone: 0,
+		},
+		{
+			// 真实踩过的坑：在会话 A 里 grep 会话 B 的日志，B 的 Permission 行会被原样
+			// 回显进 A 的日志，导致 A 被误判成等待审批。
+			name: "终端回显的日志文本不算权限事件",
+			// 一次命令会落三种回显：TerminalExecutor 命令 / StandaloneTerminalManager
+			// Running command / StandaloneTerminalProcess ChunkDebug 输出。
+			log: ts(0) + " [info] [TerminalExecutor] 命令: \"grep -nE \\\"needConfirm=true|Permission response\\\" exthost1/x.log\"\n" +
+				ts(0) + " [info] [StandaloneTerminalManager] [StandaloneTerminalManager][" + conv + "] Running command on terminal 1: grep -nE \"Permission decision: source=safety_rule_ask, allowed=true, needConfirm=true\"\n" +
+				ts(1) + " [info] [StandaloneTerminalProcess] [StandaloneTerminal][ChunkDebug][stdout#1] decodedPreview=31:2026-09-17 10:51:06.295 [info] [AcpAgent:" + conv + "] Permission response: approved=true, source=terminal\n",
+			wantAsk:  0,
+			wantDone: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// 单 conv 场景：把 byConv[conv] 与 anon 信号合并后再比较。
+			sig := scanApprovalSignals([]byte(tc.log))
+			gotAsk, gotDone := sig.anonAskMs, sig.anonDoneMs
+			if st := sig.byConv[conv]; st.askMs > gotAsk {
+				gotAsk = st.askMs
+			}
+			if st := sig.byConv[conv]; st.doneMs > gotDone {
+				gotDone = st.doneMs
+			}
+			if gotAsk != tc.wantAsk {
+				t.Errorf("askMs = %d, want %d", gotAsk, tc.wantAsk)
+			}
+			if gotDone != tc.wantDone {
+				t.Errorf("doneMs = %d, want %d", gotDone, tc.wantDone)
+			}
+		})
+	}
+}
+
+// TestScanApprovalSignals_ConvAttribution 权限信号必须归到 [AcpAgent:<conv>] 指明的
+// 那个 conv，而不是整份 log 的最近活跃 conv —— 多个 workspace 共用一个 exthost 时，
+// 否则会把 A 挂着的弹窗算到 B 头上。
+func TestScanApprovalSignals_ConvAttribution(t *testing.T) {
+	convA := "2165ef02a3a045ea9a95c4970ec82903" // 发起权限请求
+	convB := "e21ecc33d4ee426daeb71079ce799e8a" // 只是最近在活跃
+	log := "" +
+		"2026-09-17 11:08:30.501 [info] [TerminalExecutor] emit event: user_confirm_required\n" +
+		"2026-09-17 11:08:30.775 [info] [AcpAgent:" + convA + "] HTTP fallback: reporting permission request to https://x\n" +
+		"2026-09-17 11:08:31.226 [info] [AcpAgent:" + convB + "] tool executing\n"
+
+	sig := scanApprovalSignals([]byte(log))
+	if got := sig.byConv[convA].askMs; got == 0 {
+		t.Errorf("convA askMs = 0, want 非空（权限请求应归 A）")
+	}
+	if got := sig.byConv[convB].askMs; got != 0 {
+		t.Errorf("convB askMs = %d, want 0（B 只是活跃，不该继承 A 的弹窗）", got)
+	}
+	if sig.anonConvID != convA {
+		t.Errorf("anonConvID = %q, want %q（不带 conv 的 user_confirm_required 应归 A）", sig.anonConvID, convA)
+	}
+}
+
+// TestMapCodeBuddyIDERemoteState_WaitingForApproval 未答复的用户确认请求应压过
+// open run 保活，判为 waiting_for_approval；已答复/超时则回落原判定。
+func TestMapCodeBuddyIDERemoteState_WaitingForApproval(t *testing.T) {
+	now := int64(1_784_795_000_000)
+
+	cases := []struct {
+		name string
+		ev   convEventState
+		want protocol.SessionState
+	}{
+		{
+			name: "open run + 待确认请求 → waiting_for_approval（阻塞优先于保活）",
+			ev: convEventState{
+				lastSeenMs: now - 30_000, latestRunStartMs: now - 40_000, latestRunEndMs: 0,
+				lastApprovalAskMs: now - 30_000, isRunOwner: true,
+			},
+			want: protocol.StateWaitingForApproval,
+		},
+		{
+			name: "确认请求已答复 → 回落 active",
+			ev: convEventState{
+				lastSeenMs: now - 30_000, latestRunStartMs: now - 40_000, latestRunEndMs: 0,
+				lastApprovalAskMs: now - 30_000, lastApprovalDoneMs: now - 29_000, isRunOwner: true,
+			},
+			want: protocol.StateActive,
+		},
+		{
+			name: "确认请求已超时 → 回落 waiting_for_input",
+			ev: convEventState{
+				lastSeenMs: now - 60_000, latestRunStartMs: now - 5*60_000, latestRunEndMs: now - 61_000,
+				lastApprovalAskMs: now - 60_000, lastApprovalDoneMs: now - 60_000, isRunOwner: true,
+			},
+			want: protocol.StateWaitingForInput,
+		},
+		{
+			name: "待确认请求超过兜底窗口（日志记录缺失）→ 不再算等待审批",
+			ev: convEventState{
+				lastSeenMs: now - 10*60_000, latestRunStartMs: now - 10*60_000, latestRunEndMs: 0,
+				lastApprovalAskMs: now - 10*60_000, isRunOwner: true,
+			},
+			want: protocol.StateActive,
+		},
+		{
+			name: "非归属者不继承别人的待确认请求（两个字段都是 0）",
+			ev: convEventState{
+				lastSeenMs: now - 30_000, latestRunStartMs: now - 40_000, latestRunEndMs: 0,
+			},
+			want: protocol.StateWaitingForInput,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, inc := mapCodeBuddyIDERemoteState(tc.ev, 0, now)
+			if !inc {
+				t.Fatalf("include = false, want true")
+			}
+			if got != tc.want {
+				t.Errorf("state = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// writeRemoteWorkspace 在 root 下写一个 genie-history workspace 指针。
+func writeRemoteWorkspace(t *testing.T, root, b64Name, convID string) {
+	t.Helper()
+	dir := filepath.Join(root, "data", "User", "globalStorage",
+		"tencent-cloud.coding-copilot", "genie-history", b64Name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "current.json"),
+		[]byte(fmt.Sprintf(`{"conversationId":"%s"}`, convID)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeExthostLog 在 root 下写一个 exthost 对话日志（测试环境走 glob fallback 分支）。
+func writeExthostLog(t *testing.T, root, exthost, content string) {
+	t.Helper()
+	dir := filepath.Join(root, "data", "logs", "20260917T095252", exthost,
+		"Tencent-Cloud.coding-copilot")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, chatLogBaseName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCollectCodeBuddyIDERemote_WaitingForApproval 端到端复现本机 2165ef02 的真实场景：
+// 主 agent run 未 end、权限弹窗挂着没人点 → 必须是 waiting_for_approval 而不是 active。
+func TestCollectCodeBuddyIDERemote_WaitingForApproval(t *testing.T) {
+	root := t.TempDir()
+	conv := "2165ef02a3a045ea9a95c4970ec82903"
+	writeRemoteWorkspace(t, root, "L2RhdGEvaG9tZS9zaW1vbmxlaS9jcmh1Yg__", conv)
+
+	now := time.Now()
+	at := func(d time.Duration) string {
+		return now.Add(d).Format("2006-01-02 15:04:05.000")
+	}
+	writeExthostLog(t, root, "exthost1", ""+
+		at(-2*time.Minute)+" [info] [BaseAgent:craft] run start\n"+
+		at(-90*time.Second)+" [info] [AcpAgent:"+conv+"] tool executing\n"+
+		at(-60*time.Second)+" [info] [TerminalExecutor] [SafetyRule] Dangerous command detected: rm -rf /tmp/ctxre\n"+
+		at(-60*time.Second)+" [info] [TerminalExecutor] requiredApprove: false, needUserConfirm: true, fromHook: undefined\n"+
+		at(-60*time.Second)+" [info] [TerminalExecutor] emit event: user_confirm_required\n"+
+		at(-60*time.Second)+" [info] [ToolManager] 请求用户确认: toolu_01Kfs - execute_command - execute\n"+
+		at(-60*time.Second)+" [info] [AcpAgent:"+conv+"] HTTP fallback: reporting permission request to https://copilot.tencent.com/v2/x\n"+
+		at(-59*time.Second)+" [info] [ToolManager] [waitForAllToolsExecuted] Stats: {\"activeInstances\":1}\n")
+
+	sessions := collectCodeBuddyIDERemoteFromRoot(root, now.UnixMilli())
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1 (dump: %+v)", len(sessions), sessions)
+	}
+	if s := sessions[0]; s.State != protocol.StateWaitingForApproval {
+		t.Errorf("state = %q, want waiting_for_approval (sess=%+v)", s.State, s)
+	}
+}
+
+// TestCollectCodeBuddyIDERemote_ApprovalResolved 用户点下批准之后应立刻离开
+// waiting_for_approval —— 否则通知会一直挂在"等待审批"。
+func TestCollectCodeBuddyIDERemote_ApprovalResolved(t *testing.T) {
+	root := t.TempDir()
+	conv := "2165ef02a3a045ea9a95c4970ec82903"
+	writeRemoteWorkspace(t, root, "L2RhdGEvaG9tZS9zaW1vbmxlaS9jcmh1Yg__", conv)
+
+	now := time.Now()
+	at := func(d time.Duration) string {
+		return now.Add(d).Format("2006-01-02 15:04:05.000")
+	}
+	writeExthostLog(t, root, "exthost1", ""+
+		at(-2*time.Minute)+" [info] [BaseAgent:craft] run start\n"+
+		at(-60*time.Second)+" [info] [TerminalExecutor] emit event: user_confirm_required\n"+
+		at(-10*time.Second)+" [info] [AcpAgent:"+conv+"] Permission response: approved=true, alwaysApprove=undefined, isSkip=undefined, source=terminal\n")
+
+	sessions := collectCodeBuddyIDERemoteFromRoot(root, now.UnixMilli())
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1 (dump: %+v)", len(sessions), sessions)
+	}
+	if s := sessions[0]; s.State != protocol.StateActive {
+		t.Errorf("state = %q, want active (确认已批准,主 run 仍在跑)", s.State)
+	}
+}
+
+// TestCollectCodeBuddyIDERemote_MultipleExthostLogs 一台机器同时跑多个 exthost
+// （一个 IDE 窗口 / 一条远程连接一个）时，每个 session 必须拿到自己那份 log 的信号，
+// 不能全都读同一个 log —— 否则别的会话要么状态失真，要么继承别人的待确认请求。
+func TestCollectCodeBuddyIDERemote_MultipleExthostLogs(t *testing.T) {
+	root := t.TempDir()
+	convA := "2165ef02a3a045ea9a95c4970ec82903" // exthost1：挂着权限弹窗
+	convB := "e21ecc33d4ee426daeb71079ce799e8a" // exthost2：正常在跑
+	writeRemoteWorkspace(t, root, "L2RhdGEvaG9tZS9zaW1vbmxlaS9jcmh1Yg__", convA)
+	writeRemoteWorkspace(t, root, "L2RhdGEvaG9tZS9zaW1vbmxlaS9jb2RpbmctcGV0", convB)
+
+	now := time.Now()
+	at := func(d time.Duration) string {
+		return now.Add(d).Format("2006-01-02 15:04:05.000")
+	}
+	// exthost1：run 未 end + 待确认
+	writeExthostLog(t, root, "exthost1", ""+
+		at(-2*time.Minute)+" [info] [BaseAgent:craft] run start\n"+
+		at(-60*time.Second)+" [info] [AcpAgent:"+convA+"] tool executing\n"+
+		at(-30*time.Second)+" [info] [TerminalExecutor] emit event: user_confirm_required\n"+
+		at(-30*time.Second)+" [info] [AcpAgent:"+convA+"] HTTP fallback: reporting permission request to https://x\n")
+	// exthost2：run 未 end，无任何权限事件
+	writeExthostLog(t, root, "exthost2", ""+
+		at(-90*time.Second)+" [info] [BaseAgent:craft] run start\n"+
+		at(-20*time.Second)+" [info] [AcpAgent:"+convB+"] tool executing\n")
+
+	sessions := collectCodeBuddyIDERemoteFromRoot(root, now.UnixMilli())
+	if len(sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2 (dump: %+v)", len(sessions), sessions)
+	}
+	byID := map[string]protocol.SessionInfo{}
+	for _, s := range sessions {
+		byID[s.SessionID] = s
+	}
+	if s := byID[convA]; s.State != protocol.StateWaitingForApproval {
+		t.Errorf("convA state = %q, want waiting_for_approval (sess=%+v)", s.State, s)
+	}
+	if s := byID[convB]; s.State != protocol.StateActive {
+		t.Errorf("convB state = %q, want active (不应继承 convA 的待确认请求)", s.State)
+	}
+}
+
+// TestCollectCodeBuddyIDERemote_OpenRunNotHijackedByNonConvHexIDs 复现本机 exthost4 的
+// 真实抖动：日志里塞满了 32 位 hex，但其中绝大多数是 tool call id / message id / file id，
+// 不是 conversationId。run start 那一行本身不带 conv id，于是「该 log 最近活跃的 conv」
+// 会被这些噪声 id 抢走，正在跑 open run 的会话就在 active / waiting_for_input 之间
+// 每几秒抖一次。身份必须只认 current.json 里登记过的 conversationId。
+func TestCollectCodeBuddyIDERemote_OpenRunNotHijackedByNonConvHexIDs(t *testing.T) {
+	root := t.TempDir()
+	conv := "2165ef02a3a045ea9a95c4970ec82903"
+	writeRemoteWorkspace(t, root, "L2RhdGEvaG9tZS9zaW1vbmxlaS9jcmh1Yg__", conv)
+
+	now := time.Now()
+	at := func(d time.Duration) string {
+		return now.Add(d).Format("2006-01-02 15:04:05.000")
+	}
+	// 时间戳顺序照抄真实 tail：conv 只在 run start 前后出现过，之后一路都是噪声 id。
+	writeExthostLog(t, root, "exthost4", ""+
+		at(-75*time.Second)+" [info] [AcpAgent:"+conv+"] Auth session available, pushing models update\n"+
+		at(-70*time.Second)+" [info] [BaseAgent:craft] [BaseAgent] run start, retry: false\n"+
+		at(-60*time.Second)+" [info] [ToolManager] 开始执行: 45f3e49a4f8beafcad1f094ef236a221 - execute_command\n"+
+		at(-40*time.Second)+" [info] [ChatService] onMessageUpdated: messageId=0cc024f90a4a4a27b606f0d3e5f2dfdf\n"+
+		at(-20*time.Second)+" [info] [ToolManager] 执行结束: 9c1bdf49b0504f57a310e42852521bcf\n"+
+		at(-10*time.Second)+" [info] [ChatService] fileId=f3df7b03130c62102a2ae267db72bdff\n")
+
+	// 连续两个采集周期都必须稳定判 active —— 抖动正是相邻 tick 给出不同结果。
+	for i, tick := range []time.Duration{0, 3 * time.Second} {
+		sessions := collectCodeBuddyIDERemoteFromRoot(root, now.Add(tick).UnixMilli())
+		if len(sessions) != 1 {
+			t.Fatalf("tick %d: got %d sessions, want 1 (dump: %+v)", i, len(sessions), sessions)
+		}
+		if s := sessions[0]; s.State != protocol.StateActive {
+			t.Errorf("tick %d: state = %q, want active (open run 被非 conv 的 hex32 抢走归属)", i, s.State)
+		}
+	}
+}
+
+// TestCollectCodeBuddyIDERemote_OpenRunStableWhenOtherConvTalks 同一个 exthost log 里
+// 混着两个会话时，run 的归属必须在 run start 那一刻就定下来：否则另一个会话只要后来
+// 说一句话，就会把 open run 从正在跑的会话手里抢走，造成状态来回跳。
+func TestCollectCodeBuddyIDERemote_OpenRunStableWhenOtherConvTalks(t *testing.T) {
+	root := t.TempDir()
+	convA := "2165ef02a3a045ea9a95c4970ec82903" // 正在跑 open run
+	convB := "e21ecc33d4ee426daeb71079ce799e8a" // 另一个 workspace，run 开始后才有活动
+	writeRemoteWorkspace(t, root, "L2RhdGEvaG9tZS9zaW1vbmxlaS9jcmh1Yg__", convA)
+	writeRemoteWorkspace(t, root, "L2RhdGEvaG9tZS9zaW1vbmxlaS9jb2RpbmctcGV0", convB)
+
+	now := time.Now()
+	at := func(d time.Duration) string {
+		return now.Add(d).Format("2006-01-02 15:04:05.000")
+	}
+	writeExthostLog(t, root, "exthost1", ""+
+		at(-70*time.Second)+" [info] [AcpAgent:"+convA+"] tool executing\n"+
+		at(-69*time.Second)+" [info] [BaseAgent:craft] run start\n"+
+		at(-50*time.Second)+" [info] [AcpAgent:"+convA+"] tool executing\n"+
+		at(-10*time.Second)+" [info] [AcpAgent:"+convB+"] tool executing\n")
+
+	sessions := collectCodeBuddyIDERemoteFromRoot(root, now.UnixMilli())
+	if len(sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2 (dump: %+v)", len(sessions), sessions)
+	}
+	byID := map[string]protocol.SessionInfo{}
+	for _, s := range sessions {
+		byID[s.SessionID] = s
+	}
+	if s := byID[convA]; s.State != protocol.StateActive {
+		t.Errorf("convA state = %q, want active (open run 归属 run start 时刻的 convA)", s.State)
+	}
+	if s := byID[convB]; s.State != protocol.StateWaitingForInput {
+		t.Errorf("convB state = %q, want waiting_for_input (自己没有 open run)", s.State)
 	}
 }
