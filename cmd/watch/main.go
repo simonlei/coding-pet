@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -142,7 +143,7 @@ Flags:
 			sessions = filterSessions(c.CollectSessions(), tools)
 			now = time.Now()
 
-			for _, w := range dupSessionIDs(sessions) {
+			for _, w := range append(dupSessionIDs(sessions), dupWorkspaceSessions(sessions)...) {
 				if warned[w] {
 					continue
 				}
@@ -349,6 +350,46 @@ func dupSessionIDs(sessions []protocol.SessionInfo) []string {
 			shortID(id), strings.Join(names, " ")))
 	}
 	sort.Strings(out)
+	return out
+}
+
+// dupWorkspaceSessions 找出同一工具在同一 workspace（cwd）下同时报了多条会话的情况。
+// 在 dashboard 上就是「同一项目多张卡片」的重复条目：通常是工具留下了旧会话记录
+// （如 IDE 新建/切换对话后旧 conversation 仍在库里），而采集端没按 workspace 去重。
+func dupWorkspaceSessions(sessions []protocol.SessionInfo) []string {
+	byKey := map[string][]string{} // tool|cwd → session_id 列表
+	for _, s := range sessions {
+		key := string(s.Tool) + "|" + normWorkspace(s.CWD)
+		byKey[key] = append(byKey[key], s.SessionID)
+	}
+	var out []string
+	for key, ids := range byKey {
+		if len(ids) < 2 {
+			continue
+		}
+		sort.Strings(ids)
+		tool, cwd, _ := strings.Cut(key, "|")
+		out = append(out, fmt.Sprintf("工具 %s 在同一 workspace %s 上报了 %d 条会话 [%s]，采集端应按 workspace 只保留当前会话",
+			tool, cwd, len(ids), strings.Join(shortIDs(ids), " ")))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// normWorkspace 归一化 workspace 路径（分隔符统一为斜杠 + 大小写不敏感平台转小写）。
+func normWorkspace(cwd string) string {
+	k := filepath.ToSlash(cwd)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.ToLower(k)
+	}
+	return k
+}
+
+func shortIDs(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, shortID(id))
+	}
 	return out
 }
 

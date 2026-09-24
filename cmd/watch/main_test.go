@@ -102,6 +102,29 @@ func TestDupSessionIDs(t *testing.T) {
 	}
 }
 
+func TestDupWorkspaceSessions(t *testing.T) {
+	out := dupWorkspaceSessions([]protocol.SessionInfo{
+		sess(protocol.ToolCodeBuddyIDE, "aaaaaaaaaa", protocol.StateActive),
+		sess(protocol.ToolCodeBuddyIDE, "bbbbbbbbbb", protocol.StateWaitingForInput),
+		sess(protocol.ToolWorkBuddy, "cccccccccc", protocol.StateActive),
+	})
+	if len(out) != 1 {
+		t.Fatalf("want 1 warning, got %+v", out)
+	}
+	if !strings.Contains(out[0], "codebuddy_ide") || !strings.Contains(out[0], "/tmp/proj") {
+		t.Fatalf("warning should name tool and workspace: %s", out[0])
+	}
+}
+
+func TestDupWorkspaceSessions_NoneWhenDistinct(t *testing.T) {
+	a := sess(protocol.ToolCodeBuddyIDE, "aaaaaaaaaa", protocol.StateActive)
+	b := sess(protocol.ToolCodeBuddyIDE, "bbbbbbbbbb", protocol.StateActive)
+	b.CWD = "/tmp/other"
+	if out := dupWorkspaceSessions([]protocol.SessionInfo{a, b}); len(out) != 0 {
+		t.Fatalf("want no warning, got %+v", out)
+	}
+}
+
 func TestParseToolFilterAndFilterSessions(t *testing.T) {
 	if parseToolFilter("  ") != nil {
 		t.Fatal("blank filter should be nil (means all)")

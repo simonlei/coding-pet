@@ -16,6 +16,11 @@
 //   - Completed + age < 30min                           → waiting_for_input
 //   - 任意    + age ≥ 30min                              → 不上报
 //
+// 同一 workspace 只上报一条（见 pickCurrentIDEConversation）：SQLite 按 conversation
+// 存行，而 IDE 在同一 workspace 下会留下多条 conversation（新建对话 / 重开 / 会话切换），
+// 旧会话 status 仍停在 Working 且 30 分钟内不会消失，逐条上报会让 dashboard 上同一
+// 目录出现多张卡片（表现为「session 重复」）。
+//
 // 上下文占用 token 从 history 目录读取（usage.lastTokens），SQLite / message-queue 不含此信息。
 
 package collector
@@ -28,6 +33,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -206,6 +213,7 @@ func resetCodeBuddyIDEDB() {
 // ---- 主入口 ----
 
 // CollectCodeBuddyIDESessions 从 SQLite + message-queue 采集 IDE 会话。
+// 同一 workspace（cwd）只保留一条「当前会话」，详见 pickCurrentIDEConversation。
 // 库不存在或查询失败时返回 nil（不阻塞其他采集源）。
 func CollectCodeBuddyIDESessions() []protocol.SessionInfo {
 	db, ok := openCodeBuddyIDEDB()
@@ -225,7 +233,7 @@ func CollectCodeBuddyIDESessions() []protocol.SessionInfo {
 	runtimeMap := buildCodeBuddyIDERuntimeMap()
 
 	nowMs := time.Now().UnixMilli()
-	var out []protocol.SessionInfo
+	current := make(map[string]cbIDECandidate, len(sessions))
 
 	for _, s := range sessions {
 		rt, hasRuntime := runtimeMap[s.ConversationId]
@@ -236,20 +244,74 @@ func CollectCodeBuddyIDESessions() []protocol.SessionInfo {
 
 		contextTokens := codebuddyIDEContextTokensFromHistory(s.Cwd, s.ConversationId)
 
-		out = append(out, protocol.SessionInfo{
-			SessionID:     s.ConversationId,
-			PID:           0,
-			Kind:          protocol.KindInteractive,
-			Tool:          protocol.ToolCodeBuddyIDE,
-			CWD:           s.Cwd,
-			StartedAt:     s.CreatedAt,
-			LastHeartbeat: s.UpdatedAt,
-			State:         state,
-			LastActivity:  s.UpdatedAt,
-			ContextTokens: contextTokens,
-		})
+		cand := cbIDECandidate{
+			live: hasRuntime && state == protocol.StateActive,
+			info: protocol.SessionInfo{
+				SessionID:     s.ConversationId,
+				PID:           0,
+				Kind:          protocol.KindInteractive,
+				Tool:          protocol.ToolCodeBuddyIDE,
+				CWD:           s.Cwd,
+				StartedAt:     s.CreatedAt,
+				LastHeartbeat: s.UpdatedAt,
+				State:         state,
+				LastActivity:  s.UpdatedAt,
+				ContextTokens: contextTokens,
+			},
+			updatedAt:  s.UpdatedAt,
+			registered: hasRuntime,
+		}
+
+		key := workspaceKey(s.Cwd)
+		if best, ok := current[key]; ok && !preferIDEConversation(best, cand) {
+			continue
+		}
+		current[key] = cand
 	}
+
+	out := make([]protocol.SessionInfo, 0, len(current))
+	for _, cand := range current {
+		out = append(out, cand.info)
+	}
+	// map 遍历顺序随机，排序保证每轮输出稳定（否则前端排序会抖）。
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CWD != out[j].CWD {
+			return out[i].CWD < out[j].CWD
+		}
+		return out[i].SessionID < out[j].SessionID
+	})
 	return out
+}
+
+// cbIDECandidate 同一 workspace 内参与「当前会话」竞选的一条会话。
+type cbIDECandidate struct {
+	info       protocol.SessionInfo
+	updatedAt  int64
+	registered bool // 是否出现在 message-queue 中（IDE 侧登记过）
+	live       bool // 登记过且当前判定为 active：正在跑的那条
+}
+
+// preferIDEConversation 判定 cand 是否应顶掉 best。
+//
+// 优先级：
+//  1. live（message-queue 登记过且判定 active）> 其它 —— 正在跑的就是当前会话，
+//     即使另一条残留会话的 updatedAt 更新也不该顶掉它；
+//  2. updatedAt 更新 —— 取最近活跃的那条。这一步不能让「登记过」压过时间戳：
+//     message-queue 的条目会长期残留（实测 7 月的会话仍在文件里），只认登记过
+//     会让陈旧条目一直压住新建会话；
+//  3. registered（登记过）—— 时间戳相同时的弱信号；
+//  4. conversationId 更小 —— 兜底，保证结果不受 map 遍历顺序影响。
+func preferIDEConversation(best, cand cbIDECandidate) bool {
+	if best.live != cand.live {
+		return cand.live
+	}
+	if best.updatedAt != cand.updatedAt {
+		return cand.updatedAt > best.updatedAt
+	}
+	if best.registered != cand.registered {
+		return cand.registered
+	}
+	return cand.info.SessionID < best.info.SessionID
 }
 
 // readCodeBuddyIDESessions 从 SQLite 读取所有未删除的会话。
@@ -425,6 +487,17 @@ func codebuddyExtensionRoot() (string, bool) {
 func workspaceHash16(cwd string) string {
 	h := md5.Sum([]byte(filepath.ToSlash(cwd)))
 	return fmt.Sprintf("%x", h)[:16]
+}
+
+// workspaceKey 归一化 workspace 路径，作为「同一 workspace 只上报一条」的去重键。
+// IDE 写入的 cwd 分隔符与盘符大小写不统一（如 c:/Users/... 与 C:\Users\...），
+// Windows / macOS 文件系统大小写不敏感，统一成斜杠 + 小写再比较。
+func workspaceKey(cwd string) string {
+	k := filepath.ToSlash(cwd)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.ToLower(k)
+	}
+	return k
 }
 
 // readJSONFile 读取并解码一个 JSON 文件到 v，成功返回 true。

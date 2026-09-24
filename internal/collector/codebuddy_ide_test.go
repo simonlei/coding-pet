@@ -406,6 +406,145 @@ func TestCollectCodeBuddyIDESessions_Integration(t *testing.T) {
 	}
 }
 
+// ---- 同一 workspace 去重 ----
+
+// newCBIDETestDB 建一个只含给定会话的 vscdb，返回路径。
+func newCBIDETestDB(t *testing.T, rows ...cbIDESessionValue) string {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "codebuddy-sessions.vscdb")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE, value TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		val, _ := json.Marshal(r)
+		if _, err := db.Exec(`INSERT INTO ItemTable (key, value) VALUES (?, ?)`,
+			"session:"+r.ConversationId, string(val)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dbPath
+}
+
+// writeCBIDETestMQ 写一份 message-queue 文件，登记给定的 conversationId。
+func writeCBIDETestMQ(t *testing.T, convIDs ...string) string {
+	t.Helper()
+	mqDir := filepath.Join(t.TempDir(), "mq")
+	if err := os.MkdirAll(mqDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mq := cbIDEMessageQueueFile{Conversations: map[string]cbIDEMQConversation{}}
+	for _, id := range convIDs {
+		mq.Conversations[id] = cbIDEMQConversation{
+			ConversationId: id,
+			Runtime:        cbIDEMQRuntime{Activated: true, Paused: false},
+		}
+	}
+	data, _ := json.Marshal(mq)
+	if err := os.WriteFile(filepath.Join(mqDir, "ws.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	return mqDir
+}
+
+// TestCollectCodeBuddyIDESessions_OnePerWorkspace 复现「同一 workspace 上报多条」：
+// IDE 新建/切换对话后，旧的 conversation 仍停在库里且 30 分钟内不过期。
+func TestCollectCodeBuddyIDESessions_OnePerWorkspace(t *testing.T) {
+	nowMs := time.Now().UnixMilli()
+
+	// 同一 workspace 两条：current 已被 MQ 登记且仍在跑（live），
+	// orphan 是 IDE 已不再登记的残留会话，且 updatedAt 比 current 更新。
+	current := cbIDESessionValue{
+		ConversationId: "conv-current",
+		Cwd:            "/tmp/dup-project",
+		Status:         "Working",
+		CreatedAt:      nowMs - 20*60*1000,
+		UpdatedAt:      nowMs - 30*1000,
+	}
+	orphan := cbIDESessionValue{
+		ConversationId: "conv-orphan",
+		Cwd:            "/tmp/dup-project",
+		Status:         "Completed",
+		CreatedAt:      nowMs - 3*60*1000,
+		UpdatedAt:      nowMs - 20*1000,
+	}
+	// 另一个 workspace，不受影响
+	other := cbIDESessionValue{
+		ConversationId: "conv-other",
+		Cwd:            "/tmp/other-project",
+		Status:         "Working",
+		CreatedAt:      nowMs - 60*1000,
+		UpdatedAt:      nowMs - 10*1000,
+	}
+
+	dbPath := newCBIDETestDB(t, current, orphan, other)
+	mqDir := writeCBIDETestMQ(t, "conv-current", "conv-other")
+
+	origDB, origMq := codebuddyIDEDBPath, codebuddyIDEMessageQueueDir
+	codebuddyIDEDBPath = func() (string, bool) { return dbPath, true }
+	codebuddyIDEMessageQueueDir = func() (string, bool) { return mqDir, true }
+	defer func() {
+		codebuddyIDEDBPath, codebuddyIDEMessageQueueDir = origDB, origMq
+		resetCodeBuddyIDEDBForTest()
+	}()
+
+	out := CollectCodeBuddyIDESessions()
+	if len(out) != 2 {
+		t.Fatalf("expected 2 sessions (one per workspace), got %d: %+v", len(out), out)
+	}
+	// 输出按 cwd + sessionID 排序，稳定可断言
+	if out[0].SessionID != "conv-current" || out[1].SessionID != "conv-other" {
+		t.Fatalf("expected conv-current + conv-other, got %s + %s", out[0].SessionID, out[1].SessionID)
+	}
+	if out[0].State != protocol.StateActive {
+		t.Fatalf("current conversation should stay active, got %s", out[0].State)
+	}
+}
+
+// TestCollectCodeBuddyIDESessions_DedupFallsBackToNewest 无 message-queue 数据时
+// （旧版 IDE / MQ 目录缺失）退化为取 updatedAt 最新的一条。
+func TestCollectCodeBuddyIDESessions_DedupFallsBackToNewest(t *testing.T) {
+	nowMs := time.Now().UnixMilli()
+	older := cbIDESessionValue{
+		ConversationId: "conv-older",
+		Cwd:            "/tmp/dup-project",
+		Status:         "Working",
+		UpdatedAt:      nowMs - 8*60*1000,
+	}
+	newer := cbIDESessionValue{
+		ConversationId: "conv-newer",
+		Cwd:            "/tmp/dup-project",
+		Status:         "Working",
+		UpdatedAt:      nowMs - 30*1000,
+	}
+
+	dbPath := newCBIDETestDB(t, older, newer)
+	mqDir := filepath.Join(t.TempDir(), "empty-mq")
+	if err := os.MkdirAll(mqDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	origDB, origMq := codebuddyIDEDBPath, codebuddyIDEMessageQueueDir
+	codebuddyIDEDBPath = func() (string, bool) { return dbPath, true }
+	codebuddyIDEMessageQueueDir = func() (string, bool) { return mqDir, true }
+	defer func() {
+		codebuddyIDEDBPath, codebuddyIDEMessageQueueDir = origDB, origMq
+		resetCodeBuddyIDEDBForTest()
+	}()
+
+	out := CollectCodeBuddyIDESessions()
+	if len(out) != 1 {
+		t.Fatalf("expected 1 session, got %d: %+v", len(out), out)
+	}
+	if out[0].SessionID != "conv-newer" {
+		t.Fatalf("expected newest conv-newer, got %s", out[0].SessionID)
+	}
+}
+
 // ---- readJSONFile ----
 
 func TestReadJSONFile(t *testing.T) {
