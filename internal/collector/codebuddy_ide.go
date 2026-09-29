@@ -16,10 +16,11 @@
 //   - Completed + age < 30min                           → waiting_for_input
 //   - 任意    + age ≥ 30min                              → 不上报
 //
-// 同一 workspace 只上报一条（见 pickCurrentIDEConversation）：SQLite 按 conversation
-// 存行，而 IDE 在同一 workspace 下会留下多条 conversation（新建对话 / 重开 / 会话切换），
-// 旧会话 status 仍停在 Working 且 30 分钟内不会消失，逐条上报会让 dashboard 上同一
-// 目录出现多张卡片（表现为「session 重复」）。
+// 同一 workspace 只上报一条（竞选逻辑见 preferIDEConversation / cbIDECandidate）：
+// SQLite 按 conversation 存行，而 IDE 在同一 workspace 下会留下多条 conversation
+// （新建对话 / 重开 / 会话切换），旧会话 status 仍停在 Working 且 30 分钟内不会消失，
+// 逐条上报会让 dashboard 上同一目录出现多张卡片（表现为「session 重复」）。
+// 优先级：live > updatedAt 更新 > registered > conversationId（详见 preferIDEConversation）。
 //
 // 上下文占用 token 从 history 目录读取（usage.lastTokens），SQLite / message-queue 不含此信息。
 
@@ -213,7 +214,8 @@ func resetCodeBuddyIDEDB() {
 // ---- 主入口 ----
 
 // CollectCodeBuddyIDESessions 从 SQLite + message-queue 采集 IDE 会话。
-// 同一 workspace（cwd）只保留一条「当前会话」，详见 pickCurrentIDEConversation。
+// 同一 workspace（cwd）只保留一条「当前会话」，竞选逻辑详见 preferIDEConversation /
+// cbIDECandidate（优先级：live > updatedAt 更新 > registered > conversationId）。
 // 库不存在或查询失败时返回 nil（不阻塞其他采集源）。
 func CollectCodeBuddyIDESessions() []protocol.SessionInfo {
 	db, ok := openCodeBuddyIDEDB()
