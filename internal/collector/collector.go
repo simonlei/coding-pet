@@ -1,4 +1,4 @@
-// Package collector 负责采集本机所有 CodeBuddy / WorkBuddy / Claude Code session 状态。
+// Package collector 负责采集本机所有 CodeBuddy / WorkBuddy / Claude Code / Cursor session 状态。
 package collector
 
 import (
@@ -18,7 +18,7 @@ func New() *Collector {
 
 // CollectSessions 扫描所有 PID 文件，返回 session 状态列表
 // 单个 session 异常时跳过，不返回错误
-// 同时采集 CodeBuddy / WorkBuddy 与 Claude Code 各类 session
+// 同时采集 CodeBuddy / WorkBuddy / Claude Code / Cursor 各类 session
 func (c *Collector) CollectSessions() []protocol.SessionInfo {
 	var sessions []protocol.SessionInfo
 
@@ -46,6 +46,11 @@ func (c *Collector) CollectSessions() []protocol.SessionInfo {
 	// 4. WorkBuddy 桌面版（SQLite 库 ~/.workbuddy/workbuddy.db 的 sessions 表，
 	//    status 字段直读，无需 Hook）
 	sessions = append(sessions, CollectWorkBuddyDBSessions()...)
+
+	// 5. Cursor 本地 + Cursor Remote（见 cursor.go）。
+	//    同一份 ~/.cursor/projects transcript：没有 ~/.cursor-server 时标 cursor，
+	//    远程 SSH 落到本机时标 cursor_remote。桌面版 state.vscdb 只补本地。
+	sessions = append(sessions, CollectCursorSessions()...)
 
 	return sessions
 }

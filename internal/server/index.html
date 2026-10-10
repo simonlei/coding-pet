@@ -821,11 +821,13 @@
       var TOOL_LABELS = {
         codebuddy: 'CodeBuddy',
         workbuddy: 'WorkBuddy',
-        claude_code: 'Claude Code'
+        claude_code: 'Claude Code',
+        cursor: 'Cursor',
+        cursor_remote: 'Cursor Remote'
       };
 
       // 工具分组顺序：已知工具优先，其余按出现顺序追加
-      var TOOL_ORDER = ['codebuddy', 'workbuddy', 'claude_code'];
+      var TOOL_ORDER = ['codebuddy', 'workbuddy', 'claude_code', 'cursor', 'cursor_remote'];
 
       function renderSessionsByTool(sessions, machine) {
         // 过滤已终止，按 tool 分组（未知 tool 视为 codebuddy）

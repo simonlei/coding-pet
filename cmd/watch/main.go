@@ -1,5 +1,5 @@
 // coding-pet-watch 是一个独立的调试工具：只读地监控本机所有 coding agent
-// （CodeBuddy CLI / CodeBuddy IDE / IDE 远程 / WorkBuddy / Claude Code）
+// （CodeBuddy CLI / CodeBuddy IDE / IDE 远程 / WorkBuddy / Claude Code / Cursor 本地 / Cursor Remote）
 // session 的状态变化，实时打到控制台并同时写入日志文件。
 //
 // 与 coding-pet-agent 的区别：
@@ -31,7 +31,7 @@ var version = "dev"
 func main() {
 	interval := flag.Duration("interval", time.Second, "采集间隔")
 	logPath := flag.String("log", "coding-pet-watch.log", `日志文件路径（设为 "" 关闭文件日志）`)
-	toolFilter := flag.String("tool", "", "只观测这些工具，逗号分隔，如 codebuddy,claude_code,codebuddy_ide,codebuddy_ide_remote,workbuddy")
+	toolFilter := flag.String("tool", "", "只观测这些工具，逗号分隔，如 codebuddy,claude_code,codebuddy_ide,codebuddy_ide_remote,cursor,cursor_remote,workbuddy")
 	once := flag.Bool("once", false, "只采集一次、打印完整快照后退出")
 	verbose := flag.Bool("verbose", false, "同时打印 context_tokens / last_activity / heartbeat 等字段变化")
 	summary := flag.Duration("summary", time.Minute, "每隔多久打印一次状态汇总（0 关闭）")

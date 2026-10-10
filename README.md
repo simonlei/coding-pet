@@ -3,11 +3,11 @@
 [![Agent / Server](https://img.shields.io/github/v/release/simonlei/coding-pet-dashboard?filter=v[0-9]*&label=agent%20%2F%20server&color=blue)](https://github.com/simonlei/coding-pet-dashboard/releases?q=tag%3Av&expanded=true)
 [![Android](https://img.shields.io/github/v/release/simonlei/coding-pet-dashboard?filter=android-v*&label=android&color=green)](https://github.com/simonlei/coding-pet-dashboard/releases?q=tag%3Aandroid-v&expanded=true)
 
-监控多台开发机上运行的 **CodeBuddy**（CLI / IDE）、**WorkBuddy** 与 **Claude Code** 的 session 状态，在手机浏览器上集中查看。当某个 session 等待你输入（权限审批、计划确认、提问等）时，仪表盘会高亮闪烁提醒，避免 agent 在那里干等。
+监控多台开发机上运行的 **CodeBuddy**（CLI / IDE）、**WorkBuddy**、**Claude Code** 与 **Cursor**（本地 / Remote）的 session 状态，在手机浏览器上集中查看。当某个 session 等待你输入（权限审批、计划确认、提问等）时，仪表盘会高亮闪烁提醒，避免 agent 在那里干等。
 
 ## 功能
 
-- **多工具采集**：同时识别 CodeBuddy CLI、CodeBuddy IDE、WorkBuddy 桌面版与 Claude Code 的 session，并在前端按工具分组展示。
+- **多工具采集**：同时识别 CodeBuddy CLI、CodeBuddy IDE、WorkBuddy 桌面版、Claude Code 与 Cursor（本地桌面版 / Remote SSH）的 session，并在前端按工具分组展示。
 - **状态判定**：区分「工作中 / 等待输入 / 等待审批 / 离线未知」四类状态。
 - **等待提醒**：处于 `waiting_for_input` / `waiting_for_approval` 的 session 高亮闪烁，并标注所属工具。
 - **无 PID 工具的自动降级**：CodeBuddy IDE 与 WorkBuddy 无法感知 IDE/应用是否已关闭，会话进入「等待输入」超过 3 分钟后撤下顶部闪烁提醒，仅在机器列表里以淡黄色卡片保留（采集端 30 分钟后不再上报）。
@@ -26,12 +26,15 @@
 │ (每台开发机) │                   │ (中心服务器)  │                       └────────────┘
 └─────────────┘                   └──────────────┘
       │
-      │ 采集本机 session（4 类来源）
+      │ 采集本机 session
       ▼
  ~/.codebuddy/                       CodeBuddy CLI：PID 文件 + JSONL + 运行日志
  <CodeBuddyExtension>/.../history/    CodeBuddy IDE：workspace 会话历史目录
  ~/.workbuddy/workbuddy.db            WorkBuddy 桌面版：SQLite sessions 表
  $CLAUDE_CONFIG_DIR/sessions/*.json   Claude Code：PID 文件（回退扫 ~/.claude-internal、~/.claude、~/.tclaude）
+ ~/.cursor/projects/*/agent-transcripts
+   + state.vscdb（桌面版）             Cursor 本地：transcript 末行 + composer 状态
+ ~/.cursor-server + 同上 transcript   Cursor Remote：SSH 落到本机的 agent transcript
 ```
 
 - **Agent**（`cmd/agent`）：定时采集本机各类 session，判定状态，fire-and-forget 上报到 Server。只上报活跃 session（已终止的会被过滤）。
@@ -45,11 +48,13 @@
 | CodeBuddy IDE | 无 PID / 心跳，靠 `history/` 目录 `index.json` 的 mtime 新鲜度衰减 | `requests[]` 末态：`running` 且 <3min → 工作中；`running` 3~30min 或 `complete` <30min → 等待输入；≥30min → 不上报 |
 | WorkBuddy 桌面版 | 无 PID / 心跳，靠 SQLite `sessions` 表的 last_activity 新鲜度衰减 | `status` 字段：`working` 且 <3min → 工作中；`working` 3~30min 或 `completed` <30min → 等待输入；≥30min → 不上报 |
 | Claude Code | 仅依据进程是否存在（时间戳是事件驱动的，非周期心跳，不能用于判活） | `status` 字段：`waiting` + 权限类 `waitingFor`（permission prompt / sandbox request / worker request）→ 等待审批；其余 `waiting` → 等待输入；`busy`/`shell`/`idle` 等 → 工作中 |
+| Cursor 本地 | 无 PID。读 `~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl`；桌面版再读 `state.vscdb` 里未出现在 transcript 中的 composer | 末行不是 `turn_ended` → 工作中；末行是 `turn_ended` 且 <30min → 等待输入；末条是待确认工具（Shell / Write / StrReplace 等）且对应终端还没启动 → 等待审批；≥30min → 不上报。同一 workspace 只留一条 |
+| Cursor Remote | 与本地同一套 transcript，但本机存在 `~/.cursor-server`，workspace 用 exthost 日志里的 `workspacePaths` 对上 | 判定与 Cursor 本地相同，工具标为 `cursor_remote`（不跟桌面版卡片混在一起） |
 
 ## 依赖
 
 - Go 1.25+
-- [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite)：纯 Go（无 cgo）SQLite 驱动，用于只读 WorkBuddy 库，便于 Agent 跨平台交叉编译。`go build` 会自动拉取，无需系统依赖。
+- [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite)：纯 Go（无 cgo）SQLite 驱动，用于只读 WorkBuddy 库和 Cursor 桌面版 `state.vscdb`，便于 Agent 跨平台交叉编译。`go build` 会自动拉取，无需系统依赖。
 
 ## 编译
 
@@ -96,6 +101,8 @@ export DASHBOARD_ID=my-machine
 > - CodeBuddy IDE：扩展数据目录下的 `history/`（Windows：`%LOCALAPPDATA%\CodeBuddyExtension`；macOS：`~/Library/Application Support/CodeBuddyExtension`）
 > - WorkBuddy：`~/.workbuddy/workbuddy.db`
 > - Claude Code：`$CLAUDE_CONFIG_DIR/sessions`（未设置时回退扫描 `~/.claude-internal`、`~/.claude`、`~/.tclaude`）
+> - Cursor 本地：`~/.cursor/projects` 下的 agent transcript；桌面版另读 `state.vscdb`（Windows：`%APPDATA%\Cursor\User\globalStorage`；macOS：`~/Library/Application Support/Cursor/User/globalStorage`；Linux：`~/.config/Cursor/User/globalStorage`）
+> - Cursor Remote：开发机上的 `~/.cursor-server` + `~/.cursor/projects`（Cursor SSH 连到这台机器时写入）
 
 ### 便捷脚本
 
@@ -198,7 +205,7 @@ cmd/
   server/       Server 入口（接收上报 + Web UI）
 internal/
   collector/    本机 session 采集
-                collector.go        汇总四类采集器
+                collector.go        汇总各工具采集器
                 buddyhome.go        CodeBuddy CLI agent home 定义
                 pidfile.go          PID 文件扫描（pidfile_unix.go / pidfile_windows.go 平台特定进程存活检查）
                 jsonl.go            CodeBuddy JSONL 末尾记录解析
@@ -206,6 +213,8 @@ internal/
                 codebuddy_ide.go    CodeBuddy IDE：扫 history 目录
                 workbuddy_db.go     WorkBuddy 桌面版：只读 SQLite sessions 表
                 claudecode.go       Claude Code：PID 文件 + status 字段
+                cursor.go           Cursor 本地 / Remote：agent transcript
+                cursor_local.go     Cursor 桌面版：只读 state.vscdb
   notifier/     企业微信等 webhook 推送（target 管理 + 状态跃迁检测 + 脱敏 + 分发）
                 target.go           推送目标定义与文件存储
                 detector.go         状态跃迁检测（active → waiting/terminated）

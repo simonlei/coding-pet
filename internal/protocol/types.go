@@ -29,6 +29,8 @@ const (
 	ToolClaudeCode         SessionTool = "claude_code"          // Claude Code CLI
 	ToolCodeBuddyIDE       SessionTool = "codebuddy_ide"        // CodeBuddy IDE 桌面版（扫 CodeBuddyExtension 的 history 目录）
 	ToolCodeBuddyIDERemote SessionTool = "codebuddy_ide_remote" // CodeBuddy IDE 远程（VS Code Remote 连 Linux 服务器，扫 codebuddy-server-cn 的扩展 log）
+	ToolCursor             SessionTool = "cursor"               // Cursor 本地（桌面版 agent transcript / state.vscdb）
+	ToolCursorRemote       SessionTool = "cursor_remote"        // Cursor Remote（SSH 连到本机，~/.cursor-server + agent transcript）
 )
 
 // SessionInfo 单个 CodeBuddy session 的状态
@@ -74,7 +76,7 @@ type DashboardResponse struct {
 	TotalSessions int             `json:"total_sessions"`
 	ActiveCount   int             `json:"active_count"`
 	WaitingCount  int             `json:"waiting_count"`
-	ApprovalCount int             `json:"approval_count"`            // 仅 waiting_for_approval 的 session 数
-	OfflineCount  int             `json:"offline_count"`             // 掉线机器数
+	ApprovalCount int             `json:"approval_count"`           // 仅 waiting_for_approval 的 session 数
+	OfflineCount  int             `json:"offline_count"`            // 掉线机器数
 	ServerVersion string          `json:"server_version,omitempty"` // 由 ldflags 注入的 server 版本号
 }
