@@ -38,6 +38,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	selfUpdate := flag.Bool("self-update", false, "Check GitHub for a newer release and update if available, then exit")
 	autoUpdate := flag.Bool("auto-update", envAutoUpdate(), "Enable periodic auto-update (env: CODING_PET_AUTO_UPDATE=false to disable)")
+	githubToken := flag.String("github-token", envOr("GITHUB_TOKEN", ""), "GitHub token for release checks (optional; raises API rate limit from 60/hr to 5000/hr). Env: GITHUB_TOKEN")
 
 	// 默认 usage 只列 flag，缺 target 子命令说明；覆盖之。
 	flag.Usage = func() {
@@ -72,7 +73,7 @@ Flags:
 	}
 
 	if *selfUpdate {
-		runSelfUpdateOnce("agent", nil)
+		runSelfUpdateOnce("agent", *githubToken, nil)
 		return
 	}
 
@@ -115,6 +116,7 @@ Flags:
 		selfupdate.StartAuto(selfupdate.Options{
 			Kind:           "agent",
 			CurrentVersion: version,
+			GitHubToken:    *githubToken,
 		}, selfupdate.DefaultInterval)
 	} else {
 		log.Printf("selfupdate: auto-update disabled by flag/env")
@@ -212,11 +214,12 @@ func envAutoUpdate() bool {
 
 // runSelfUpdateOnce 手动触发一次检查更新；成功升级则 os.Exit（不返回），
 // 无新版或失败时打印结果并 return。
-func runSelfUpdateOnce(kind string, beforeRestart func() error) {
+func runSelfUpdateOnce(kind, githubToken string, beforeRestart func() error) {
 	log.Printf("selfupdate: manual check triggered (kind=%s, local=%s)", kind, version)
 	updated, err := selfupdate.CheckAndUpdate(selfupdate.Options{
 		Kind:           kind,
 		CurrentVersion: version,
+		GitHubToken:    githubToken,
 		BeforeRestart:  beforeRestart,
 	})
 	if err != nil {

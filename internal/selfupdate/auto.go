@@ -4,6 +4,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -24,8 +25,8 @@ func StartAuto(opts Options, interval time.Duration) func() {
 	// 首次触发前也加一次抖动，避免所有实例启动即打 API
 	delay := jitter(interval)
 	auth := "anonymous (60/hr limit)"
-	if os.Getenv("GITHUB_TOKEN") != "" {
-		auth = "GITHUB_TOKEN present (5000/hr limit)"
+	if strings.TrimSpace(opts.GitHubToken) != "" || strings.TrimSpace(os.Getenv("GITHUB_TOKEN")) != "" {
+		auth = "token present (5000/hr limit)"
 	}
 	log.Printf("selfupdate: auto-update enabled (kind=%s, current=%s, interval=%s, auth=%s), first check in %s",
 		opts.Kind, opts.CurrentVersion, interval, auth, delay)

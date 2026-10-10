@@ -17,6 +17,9 @@ type Options struct {
 	// BeforeRestart 在替换成功后、spawn 子进程前调用。
 	// server 传入包装 srv.Shutdown 的闭包以释放端口；agent 传 nil。
 	BeforeRestart func() error
+	// GitHubToken 是可选的 GitHub 个人访问令牌。非空时覆盖 Client 从
+	// GITHUB_TOKEN 读到的值；请求会带 Authorization，把 API 限额从 60/hr 提到 5000/hr。
+	GitHubToken string
 
 	// 以下字段用于测试注入，生产环境留零值走默认实现。
 	client  *Client                                            // nil 时用 NewClient()
@@ -35,6 +38,22 @@ func binaryName(kind string) string {
 	return name
 }
 
+// clientFor 选出本次检查使用的 Client。
+// 未注入时用 NewClient()（其 Token 来自 GITHUB_TOKEN）。
+// Options.GitHubToken 非空时覆盖 Token，且不改写调用方持有的实例。
+func clientFor(opts Options) *Client {
+	client := opts.client
+	if client == nil {
+		client = NewClient()
+	}
+	if tok := strings.TrimSpace(opts.GitHubToken); tok != "" && client.Token != tok {
+		cloned := *client
+		cloned.Token = tok
+		client = &cloned
+	}
+	return client
+}
+
 // CheckAndUpdate 执行一次完整自更新：检查最新版 → 若更新则下载/校验/解压/替换 → 重启。
 //
 // 返回 (updated, err)：
@@ -42,12 +61,13 @@ func binaryName(kind string) string {
 //   - 检查/下载/校验/替换任一步失败：返回 (false, err)，不重启、不退出（安全回退，R5）。
 //   - 成功替换并 spawn 子进程后：调用 exit(0)（生产环境不返回；测试注入时返回 (true, nil)）。
 func CheckAndUpdate(opts Options) (bool, error) {
-	client := opts.client
-	if client == nil {
-		client = NewClient()
-	}
+	client := clientFor(opts)
 
-	log.Printf("selfupdate: checking latest release from GitHub (kind=%s, local=%s)", opts.Kind, opts.CurrentVersion)
+	auth := "anonymous"
+	if client.Token != "" {
+		auth = "token"
+	}
+	log.Printf("selfupdate: checking latest release from GitHub (kind=%s, local=%s, auth=%s)", opts.Kind, opts.CurrentVersion, auth)
 	rel, err := client.FetchLatest()
 	if err != nil {
 		log.Printf("selfupdate: check failed: %v", err)

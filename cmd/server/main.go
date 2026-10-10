@@ -27,6 +27,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	selfUpdate := flag.Bool("self-update", false, "Check GitHub for a newer release and update if available, then exit")
 	autoUpdate := flag.Bool("auto-update", envAutoUpdate(), "Enable periodic auto-update (env: CODING_PET_AUTO_UPDATE=false to disable)")
+	githubToken := flag.String("github-token", os.Getenv("GITHUB_TOKEN"), "GitHub token for release checks (optional; raises API rate limit from 60/hr to 5000/hr). Env: GITHUB_TOKEN")
 	flag.Parse()
 
 	if *showVersion {
@@ -41,7 +42,7 @@ func main() {
 
 	if *selfUpdate {
 		// 手动一次性触发；server 未启动时无需 BeforeRestart
-		runSelfUpdateOnce(nil)
+		runSelfUpdateOnce(*githubToken, nil)
 		return
 	}
 
@@ -65,6 +66,7 @@ func main() {
 		selfupdate.StartAuto(selfupdate.Options{
 			Kind:           "server",
 			CurrentVersion: version,
+			GitHubToken:    *githubToken,
 			BeforeRestart: func() error {
 				log.Printf("selfupdate: releasing listener before restart")
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -117,11 +119,12 @@ func envAutoUpdate() bool {
 }
 
 // runSelfUpdateOnce 手动触发一次检查更新。
-func runSelfUpdateOnce(beforeRestart func() error) {
+func runSelfUpdateOnce(githubToken string, beforeRestart func() error) {
 	log.Printf("selfupdate: manual check triggered (kind=server, local=%s)", version)
 	updated, err := selfupdate.CheckAndUpdate(selfupdate.Options{
 		Kind:           "server",
 		CurrentVersion: version,
+		GitHubToken:    githubToken,
 		BeforeRestart:  beforeRestart,
 	})
 	if err != nil {

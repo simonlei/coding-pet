@@ -97,6 +97,47 @@ func TestFetchLatest_Happy(t *testing.T) {
 	}
 }
 
+func TestFetchLatest_SendsToken(t *testing.T) {
+	const token = "ghp_testtoken"
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.Header.Get("User-Agent") == "" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		json.NewEncoder(w).Encode([]Release{{TagName: "v1.2.3"}})
+	}))
+	defer srv.Close()
+
+	c := &Client{APIBase: srv.URL, HTTP: srv.Client(), Token: token}
+	if _, err := c.FetchLatest(); err != nil {
+		t.Fatalf("FetchLatest error: %v", err)
+	}
+	if gotAuth != "Bearer "+token {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer "+token)
+	}
+}
+
+func TestFetchLatest_OmitsAuthWhenTokenEmpty(t *testing.T) {
+	var gotAuth string
+	sawHeader := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, sawHeader = r.Header["Authorization"]
+		json.NewEncoder(w).Encode([]Release{{TagName: "v1.2.3"}})
+	}))
+	defer srv.Close()
+
+	c := &Client{APIBase: srv.URL, HTTP: srv.Client()}
+	if _, err := c.FetchLatest(); err != nil {
+		t.Fatalf("FetchLatest error: %v", err)
+	}
+	if sawHeader || gotAuth != "" {
+		t.Errorf("Authorization header = %q, want absent", gotAuth)
+	}
+}
+
 func TestFetchLatest_HTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

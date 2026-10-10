@@ -70,6 +70,46 @@ func makeFakeExe(t *testing.T, kind string) string {
 	return path
 }
 
+func TestClientFor_GitHubTokenOverridesWithoutMutating(t *testing.T) {
+	injected := &Client{Token: "from-env"}
+	got := clientFor(Options{GitHubToken: "  from-flag  ", client: injected})
+	if injected.Token != "from-env" {
+		t.Fatalf("injected client token mutated to %q", injected.Token)
+	}
+	if got == injected {
+		t.Fatal("expected a cloned client when token is overridden")
+	}
+	if got.Token != "from-flag" {
+		t.Fatalf("token = %q, want from-flag", got.Token)
+	}
+}
+
+func TestCheckAndUpdate_SendsGitHubToken(t *testing.T) {
+	const token = "ghp_from_flag"
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		json.NewEncoder(w).Encode([]Release{{TagName: "v1.0.0"}})
+	}))
+	defer srv.Close()
+
+	updated, err := CheckAndUpdate(Options{
+		Kind:           "agent",
+		CurrentVersion: "v1.0.0",
+		GitHubToken:    token,
+		client:         &Client{APIBase: srv.URL, HTTP: srv.Client()},
+	})
+	if err != nil {
+		t.Fatalf("CheckAndUpdate: %v", err)
+	}
+	if updated {
+		t.Fatal("updated = true, want false (already current)")
+	}
+	if gotAuth != "Bearer "+token {
+		t.Fatalf("Authorization = %q, want Bearer %s", gotAuth, token)
+	}
+}
+
 func TestCheckAndUpdate_HappyPath(t *testing.T) {
 	srv, client, _ := setupFakeGitHub(t, "v9.9.9", "NEW-AGENT", "NEW-SERVER")
 	defer srv.Close()

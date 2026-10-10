@@ -50,7 +50,7 @@ type Client struct {
 	APIBase string
 	HTTP    *http.Client
 	// Token 为可选的 GitHub 个人访问令牌。设置后限流从 60/hr 提升到 5000/hr。
-	// 由 NewClient 从 GITHUB_TOKEN 环境变量读取；测试可显式覆盖或置空。
+	// NewClient 从 GITHUB_TOKEN 读取；--github-token / Options.GitHubToken 非空时覆盖。
 	Token string
 }
 

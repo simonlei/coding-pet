@@ -13,7 +13,7 @@
 - **无 PID 工具的自动降级**：CodeBuddy IDE 与 WorkBuddy 无法感知 IDE/应用是否已关闭，会话进入「等待输入」超过 3 分钟后撤下顶部闪烁提醒，仅在机器列表里以淡黄色卡片保留（采集端 30 分钟后不再上报）。
 - **多机器汇总**：各开发机运行 Agent，上报到中心 Server；机器列表按「等待优先 > 在线优先 > MachineID」稳定排序。
 - **离线检测**：90 秒无上报标记为离线，离线机器的 session 状态显示为 `unknown`（避免显示过期的「等待输入」）；离线超过 24 小时后从内存清理。
-- **自动更新**：Agent 与 Server 默认开启后台自更新，每 30 分钟（带抖动）向 GitHub Release 查询新版本，检测到更新即下载对应平台产物并原地替换重启；也支持 `--self-update` 手动触发一次。可用 `--auto-update=false` 或 `CODING_PET_AUTO_UPDATE=false` 关闭，配置 `GITHUB_TOKEN` 可将匿名 60/hr 的调用限额提升至 5000/hr。
+- **自动更新**：Agent 与 Server 默认开启后台自更新，每 30 分钟（带抖动）向 GitHub Release 查询新版本，检测到更新即下载对应平台产物并原地替换重启；也支持 `--self-update` 手动触发一次。可用 `--auto-update=false` 或 `CODING_PET_AUTO_UPDATE=false` 关闭。`--github-token` 或环境变量 `GITHUB_TOKEN` 会随请求带上，把匿名 60/hr 的调用限额提升至 5000/hr。
 - **多 target webhook 推送**：Agent 除了上报中心 server 之外，可配置任意数量的 webhook target（当前实现企业微信群机器人，`kind` 字段已为钉钉 / Lark / Slack / 自定义 webhook 预留）。session 状态从 `active` 稳定跃迁到 `waiting_for_input` / `waiting_for_approval` / `terminated` 时并行推送到全部 target，单个 target 失败不影响其他；通过 `add target` / `list targets` / `remove target` 三件套子命令管理，Agent 每 10 秒热重载配置无需重启。
 - **安卓客户端 + 伪熄屏**：随仓库提供 [Android WebView 客户端](android/README.md)，全屏显示仪表盘并 `FLAG_KEEP_SCREEN_ON` 保持常亮；可配置「伪黑屏时段」（默认 18:00 → 次日 09:00），进入时段后叠加黑色遮罩 + 亮度缓慢衰减到最低，页面仍在后台实时刷新；出现「等待输入/等待审批」提醒时自动回到全亮以引起注意，触摸屏幕可临时唤醒 10 秒。
 
@@ -162,6 +162,7 @@ http://<中心服务器IP>:3000
 | `--version` | - | 打印版本并退出 |
 | `--self-update` | false | 立即向 GitHub Release 检查一次更新，有新版则替换重启后退出 |
 | `--auto-update` | true | 后台每 30 分钟（带抖动）自动检查更新，可用 `CODING_PET_AUTO_UPDATE=false` 关闭 |
+| `--github-token` | `GITHUB_TOKEN` | 访问 GitHub Release API 的 token；设置后限额从 60 次/小时提到 5000 次/小时 |
 
 ### coding-pet-agent
 
@@ -175,8 +176,9 @@ http://<中心服务器IP>:3000
 | `--version` | - | 打印版本并退出 |
 | `--self-update` | false | 立即向 GitHub Release 检查一次更新，有新版则替换重启后退出 |
 | `--auto-update` | true | 后台每 30 分钟（带抖动）自动检查更新，可用 `CODING_PET_AUTO_UPDATE=false` 关闭 |
+| `--github-token` | `GITHUB_TOKEN` | 访问 GitHub Release API 的 token；设置后限额从 60 次/小时提到 5000 次/小时 |
 
-> **自动更新**：Server 在升级前会先关掉监听释放端口再替换二进制；Agent 直接原地替换。默认匿名访问 GitHub API（60 次/小时），可通过环境变量 `GITHUB_TOKEN` 提升到 5000 次/小时。
+> **自动更新**：Server 在升级前会先关掉监听释放端口再替换二进制；Agent 直接原地替换。默认匿名访问 GitHub API（60 次/小时）。传入 `--github-token`，或设置环境变量 `GITHUB_TOKEN`（作为该参数的默认值），查询 release 与下载产物时都会带上 `Authorization: Bearer`，限额提升到 5000 次/小时。升级重启会原样保留命令行里的 `--github-token`。
 
 ### coding-pet-agent 子命令（webhook target 管理）
 
